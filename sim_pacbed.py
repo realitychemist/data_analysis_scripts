@@ -1,4 +1,4 @@
-#%%
+# %%
 """PACBED Thickness Series Simulation
 
 This version of the PACBED image simulation script is designed to be used with abTEM versions >= 1.0.0. This script
@@ -37,8 +37,9 @@ if not version.parse(abtem.__version__) >= version.parse("1.0.0"):
                        "Please update you abTEM version.")
 
 
+# %%
 @dataclass
-class Parameters:
+class PACBEDPrms:
     """Parameters for the PACBED simulation.  Each parameter has its own documentation."""
 
     device: Literal["gpu", "cpu"]
@@ -55,7 +56,8 @@ class Parameters:
     represented in reciprocal space via the equation ``|k| < min(Nx/(2*a), Ny/(2*b))`` where ``Nx`` and ``Ny`` are 
     the number of samples in the x and y directions (``a`` and ``b`` are the model dimensions; see ``tiling`` below). 
     Samller samplings also result in longer simulation times. A uniform resampling is applied to all PACBEDs to 
-    ensure square pixels even for non-square models."""
+    ensure square pixels even for non-square models; as a result non-square models will produce unequal numbers 
+    of pixels in the kx and ky dimensions."""
 
     tiling: int | tuple[int, int] | list[int] | list[tuple[int, int]]
     """Number of times to tile the projected cell; more tiling will give higher resoution PACBEDs at the cost of 
@@ -111,7 +113,8 @@ class Parameters:
     """The angle of mistilt (counterclockwise from the +x direction, radians)."""
 
     def __post_init__(self):  # This section sanity-checks the various parameters and ensures consistency
-        assert self.device in ["gpu", "cpu"]
+        if self.device not in ["gpu", "cpu"]:
+            raise RuntimeError("Device must be one of ``'gpu'`` or ``'cpu'``.")
 
         for prm in [("beam_energy", self.beam_energy),
                     ("convergence", self.convergence),
@@ -124,32 +127,44 @@ class Parameters:
                     ("tilt_mag", self.tilt_mag)
                     ]:
             # noinspection PyTypeChecker
-            assert prm[1] >= 0, f"``{prm[0]}`` must be non-negative."
+            if not prm[1] >= 0:
+                raise RuntimeError(f"``{prm[0]}`` must be non-negative.")
 
-        assert self.thickness_step <= self.thickness, "``thickness_step`` must be <= ``total thickness``."
-        assert self.slice_thickness <= self.thickness_step, "``slice_thickness`` muse be <= ``thickness_step``."
+        if not self.thickness_step <= self.thickness:
+            raise RuntimeError("``thickness_step`` must be <= ``total thickness``.")
+        if not self.slice_thickness <= self.thickness_step:
+            raise RuntimeError("``slice_thickness`` muse be <= ``thickness_step``.")
 
         if type(self.zone) is tuple:
-            assert type(self.tiling) is int or type(self.tiling) is tuple, "``tiling`` cannot be a list if ``zone`` "\
-                                                                           "is not."
+            if not (type(self.tiling) is int or type(self.tiling) is tuple):
+                raise RuntimeError("``tiling`` cannot be a list if ``zone`` is not.")
         if type(self.zone) is list and type(self.tiling) is list:
-            assert len(self.zone) == len(self.tiling), "Length mismatch between ``zone`` and ``tiling``."
+            if not len(self.zone) == len(self.tiling):
+                raise RuntimeError("Length mismatch between ``zone`` and ``tiling``.")
         if type(self.tiling) is int:
-            assert self.tiling > 0, "``tiling`` must be positive and non-zero."
+            if not self.tiling > 0:
+                raise RuntimeError("``tiling`` must be positive and non-zero.")
         if type(self.tiling) is tuple:
-            assert len(self.tiling) == 2, "``tiling`` must have two dimensions."
+            if not len(self.tiling) == 2:
+                raise RuntimeError("``tiling`` must have two dimensions.")
             for t in self.tiling:
-                assert type(t) is int, "``tiling`` must contain only integers."
-                assert t > 0, "All ``tiling`` dimesions must be positive and non-zero."
+                if not type(t) is int:
+                    raise RuntimeError("``tiling`` must contain only integers.")
+                if not t > 0:
+                    raise RuntimeError("All ``tiling`` dimesions must be positive and non-zero.")
         if type(self.tiling) is list:
             for til in self.tiling:
                 if type(til) is int:
-                    assert til > 0, "All ``tiling``s must be positive and non-zero."
+                    if not til > 0:
+                        raise RuntimeError("All ``tiling``s must be positive and non-zero.")
                 if type(til) is tuple:
-                    assert len(til) == 2, "``tiling`` must have two dimensions."
+                    if not len(til) == 2:
+                        raise RuntimeError("``tiling`` must have two dimensions.")
                     for t in til:
-                        assert type(t) is int, "All ``tiling``s must contain only integers."
-                        assert t > 0, "All ``tiling`` dimensions must be positive and non-zero."
+                        if not type(t) is int:
+                            raise RuntimeError("All ``tiling``s must contain only integers.")
+                        if not t > 0:
+                            raise RuntimeError("All ``tiling`` dimensions must be positive and non-zero.")
 
         if self.beam_energy < 10E3:
             warn(f"Beam energy is very low ({self.beam_energy}eV). Are you sure this is what you meant to do?")
@@ -208,24 +223,24 @@ def _minmax_norm(img):
 
 # %% Define simulation parameters
 # All parameters are required
-prms = Parameters(
+prms = PACBEDPrms(
         device="gpu",
         beam_energy=200E3,
         convergence=17.9,
         sampling=0.1,
-        zone=[(1, 1, 0), (1, -1, 0), (1, 1, 1)],
-        tiling=[(27, 30), (27, 30), (30, 30)],
+        zone=(1, 1, 0),
+        tiling=(27, 30),
         max_angle=50,
         thickness=200,
-        thickness_step=20,
+        thickness_step=200,
         slice_thickness=2,
-        phonon_configs=4,
+        phonon_configs=0,
         phonon_sigmas={"Al": 0.0567,  # DOI: 10.1107/S0108767309004966
                        "Sc": 0.0567,  # No good source for this, assuming the same as Al
                        "N":  0.0593},
         seed=None,
-        tilt_mag=0,
-        tilt_angle=float(np.radians(0)))  # Auto-convert degrees to radians
+        tilt_mag=50,
+        tilt_angle=float(np.radians(90)))  # Auto-convert degrees to radians
 
 # %% Low-level configuration settings
 # These only need to be adjusted in the case of out-of-memory errors or very poor performance
@@ -316,6 +331,7 @@ for za, tile in zip(prms.zone, prms.tiling):
         atoms *= (tile, tile, 1)
     elif type(tile) is tuple:
         atoms *= (tile[0], tile[1], 1)
+    view(atoms)
 
     if prms.phonon_configs != 0:
         configs = abtem.FrozenPhonons(atoms,
@@ -327,19 +343,16 @@ for za, tile in zip(prms.zone, prms.tiling):
                                       sigmas=0,  # No displacement ==> disables frozen phonons
                                       num_configs=1)
 
-    # We need to know the indices of the save planes before we create the potential, so: math!
     save_delta = round(prms.thickness_step / prms.slice_thickness)
-    total_slices = int(atoms.cell[2][2] / prms.slice_thickness) + 1
-    save_planes = tuple([save_delta * i for i in range(1, total_slices) if i * save_delta <= total_slices])
     potential = abtem.Potential(configs,
                                 sampling=prms.sampling,
                                 projection="infinite",
                                 parametrization="kirkland",
                                 slice_thickness=prms.slice_thickness,
-                                exit_planes=save_planes)
+                                exit_planes=save_delta)
 
-    tilt = (prms.tilt_mag * np.sin(prms.tilt_angle),
-            prms.tilt_mag * np.cos(prms.tilt_angle))
+    tilt = (prms.tilt_mag * np.cos(prms.tilt_angle),  # x
+            prms.tilt_mag * np.sin(prms.tilt_angle))  # y
     probe = abtem.Probe(semiangle_cutoff=prms.convergence,
                         extent=potential.extent,
                         sampling=prms.sampling,
@@ -360,8 +373,7 @@ for za, tile in zip(prms.zone, prms.tiling):
     pacbed_stack = np.sum(measurement.array, axis=(1, 2))
     for i, plane in enumerate(pacbed_stack):
         pacbed_stack[i] = _minmax_norm(plane)
-    pacbed_stack = pacbed_stack.astype("float32")
-    np.moveaxis(pacbed_stack, 0, -1)  # Z Kx Ky --> Kx Ky Z (canonical order for ImageJ import)
+    pacbed_stack = pacbed_stack.astype("float32")  # Z Kx Ky
 
     print("Exporting...", end=" ")
 
@@ -376,19 +388,24 @@ for za, tile in zip(prms.zone, prms.tiling):
     export_name = f"{fname}_PACBED_tilt{prms.tilt_mag}mrad@{np.degrees(prms.tilt_angle)}deg_" +\
                   f"{str(za)}_{str(int(prms.thickness))}A_with_stepsize_{str(int(prms.thickness_step))}A.tif"
     res = _what_resolution(a, b, tile)
-    description = f"name: {fname}\n"\
-                  f"zone: {za}\n"\
-                  f"thickness: {prms.thickness}A\n"\
-                  f"step: {prms.thickness_step}A\n"\
-                  f"tilt: {prms.tilt_mag}mrad@{np.degrees(prms.tilt_angle)}deg\n" \
-                  f"resolution: {res:0.4f}A^-1/px"
+    description = f"name: {fname}\n" \
+                  f"zone: {za}\n" \
+                  f"thickness: {prms.thickness} A\n" \
+                  f"step: {prms.thickness_step} A\n" \
+                  f"tilt: {prms.tilt_mag}mrad@{np.degrees(prms.tilt_angle):.1f}deg\n" \
+                  f"resolution: {res:0.4f} A^-1/px"
 
+    slice_labels = [f"{tks:.1f} A" for tks in potential.exit_thicknesses]
     imwrite(savedir / export_name,
             pacbed_stack,
             photometric="minisblack",
             software="abTEM",
-            description=description)
+            metadata={"axes": "ZYX",
+                      "Labels": slice_labels,
+                      "Info": description})
 
     print("Done!")
 
 print("Simulation complete!")
+
+#%%
