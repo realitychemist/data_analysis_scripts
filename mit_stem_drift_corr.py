@@ -94,8 +94,8 @@ match structure_type:
             case ".tif":
                 load_fn = tifffile.imread
             case _:
-                raise RuntimeError(f"File formats other than .tif are not yet supported.  Supported filetypes will"
-                                   f" eventually include: {supported}")
+                raise NotImplementedError(f"File formats other than .tif are not yet supported.  "
+                                          f"Supported filetypes will eventually include: {supported}")
 
         haadfs = []
         for file in file_list:

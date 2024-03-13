@@ -1,6 +1,5 @@
 import abtem
 from collections.abc import Collection, Sequence
-
 from numpy import cos, sin
 from packaging import version
 from warnings import warn

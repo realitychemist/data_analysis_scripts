@@ -10,6 +10,7 @@ import quickcrop as qc
 import SingleOrigin as so
 import matplotlib
 from tifffile import imread
+from importlib.metadata import version
 import hyperspy.api as hs
 from scipy.stats import describe
 from warnings import warn
@@ -17,8 +18,17 @@ from warnings import warn
 # from pymatgen.io.ase import AseAtomsAdaptor
 # from data_analysis_scripts.cse_secrets import MP_API_KEY
 
+if version("hyperspy") > "1.7.6":
+    warn("File IO was deprecated in HyperSpy versions 2.0rc0 and beyond; .emd file importing will not work.")
+
 matplotlib.use("TkAgg")
 plt.style.use('dark_background')
+
+
+def _minmax_norm(img):
+    _min, _max = np.min(img), np.max(img)
+    normed = (img - _min) / (_max - _min)
+    return normed
 
 
 def nn_distances(origin_lat: np.ndarray, dest_lat: np.ndarray, pixel_size: float)\
@@ -46,12 +56,6 @@ def nn_distances(origin_lat: np.ndarray, dest_lat: np.ndarray, pixel_size: float
                           for neighbor_pos in [a, b, c, d]
                           if not len(neighbor_pos) == 0])
     return np.asarray(distances)
-
-
-def _minmax_norm(img):
-    _min, _max = np.min(img), np.max(img)
-    normed = (img - _min) / (_max - _min)
-    return normed
 
 
 # %% Import the image
@@ -266,7 +270,7 @@ for combo in combos:
 # TODO: Instead of finding the neighbors again, use the NN-distances list from the previous cell
 bin_width: float = 0.01  # Angstroms
 errorbar_offset: float = 50  # How far above the tallest histogram to place the error bars
-print_stats: bool = False  # Print distribution statistics to stdout
+print_stats: bool = True  # Print distribution statistics to stdout
 
 if len(combos) > len(basic_colors):  # This is checked when plotting vPCFs, but in case that step is skipped check again
     raise RuntimeError(f"Trying to plot {len(combos)} histograms with {len(basic_colors)} colors: plot fewer vPCFs or"
