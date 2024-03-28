@@ -22,24 +22,23 @@ print([f"{i}: {f.stem}" for i, f in enumerate(file_list)])
 zas = [(0, 0, 1), (0, 1, 0), (1, 0, 0), (1, 1, 0), (1, 0, 1), (0, 1, 1), (1, 1, 1)]
 radius = 10  # The model radius for generating vPCF parameters (Angstrom)
 skip_elements: list[str] = ["O"]  # The listed elements will be skipped when generating the test vPCF parameters
-test=True
+test: bool = True  # Set this flag to show the first structure in structural_mapping and then break; for debugging
 
 structural_mapping = {(fname, za): None for fname in file_list for za in zas}
 for mapping in structural_mapping.keys():
     # Build the test surface
-    cell = aio.read(mapping[0])
-    test_surf = abuild.surface(cell, mapping[1], 1, periodic=True)
-    test_surf = orthogonalize_cell(test_surf)
+    test_cell = aio.read(mapping[0])
+    # test_cell.rotate(mapping[1], "z", rotate_cell=True)
     if test:
         from ase import visualize
-        visualize.view(test_surf*(4, 4, 4))
+        visualize.view(test_cell * (4, 4, 4))
         break
-    span = {"a": np.linalg.norm(test_surf.cell[0]),
-            "b": np.linalg.norm(test_surf.cell[1])}
+    span = {"a": np.linalg.norm(test_cell.cell[0]),
+            "b": np.linalg.norm(test_cell.cell[1])}
     mul = (int(np.ceil(2*radius/span["a"])), int(np.ceil(2*radius/span["b"])), 1)
-    test_surf *= mul
+    test_cell *= mul
     # Drop unwanted atoms and select unique x-y positions
-    selected_positions = [pos for pos, e in zip(test_surf.get_positions(), test_surf.get_chemical_symbols())
+    selected_positions = [pos for pos, e in zip(test_cell.get_positions(), test_cell.get_chemical_symbols())
                           if e not in skip_elements]
     roundoff = 3  # Need to round off to some precision for set reduction to work well; 0.1 pm seems fine
     unique_xy = {(round(pos[0], roundoff),

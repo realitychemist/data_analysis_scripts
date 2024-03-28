@@ -1,4 +1,5 @@
-"""Process DPC data from an .emd (Velox) file into iDPC/dDPC images"""
+"""Process DPC data from an .emd (Velox) file into iDPC/dDPC images.
+Script by CSE, adapted from a script by scaldero."""
 from pathlib import Path
 from tkinter.filedialog import askopenfilename, askdirectory
 # from typing import Literal
