@@ -2,6 +2,7 @@
 Script by CSE, adapted from a script by scaldero."""
 from pathlib import Path
 from tkinter.filedialog import askopenfilename, askdirectory
+from tkinter.simpledialog import askfloat
 # from typing import Literal
 # from matplotlib import pyplot as plt
 # from pystackreg import StackReg
@@ -10,29 +11,46 @@ import hyperspy.api as hs
 import numpy as np
 
 
-def _minmax_norm(img):
-    _min, _max = np.min(img), np.max(img)
-    normed = (img - _min) / (_max - _min)
-    return normed
-
-
 def _reg_progress(current_iteration, end_iteration):
     print(f"Registering image {current_iteration} / {end_iteration}")
 
 
 # %% Load the images from .emd
 infile = hs.load(askopenfilename())
-img_ac = _minmax_norm(next(signal for signal in infile
-                           if signal.metadata.General.title == "A-C"))
-img_bd = _minmax_norm(next(signal for signal in infile
-                           if signal.metadata.General.title == "B-D"))
-haadf = _minmax_norm(next(signal for signal in infile
-                          if signal.metadata.General.title == "HAADF"))
+try:
+    img_ac = next(signal for signal in infile if signal.metadata.General.title == "A-C")
+    img_bd = next(signal for signal in infile if signal.metadata.General.title == "B-D")
+except StopIteration:
+    try:  # Might have individual sectors; construct difference images
+        img_a = next(signal for signal in infile
+                     if signal.metadata.General.title == "DF4-A")
+        img_b = next(signal for signal in infile
+                     if signal.metadata.General.title == "DF4-B")
+        img_c = next(signal for signal in infile
+                     if signal.metadata.General.title == "DF4-C")
+        img_d = next(signal for signal in infile
+                     if signal.metadata.General.title == "DF4-D")
+        img_ac = img_a.data-img_c.data
+        img_bd = img_b.data-img_d.data
+    except StopIteration:
+        raise RuntimeError("File may not contain any DPC data")
+# haadf = _minmax_norm(next(signal for signal in infile
+#                           if signal.metadata.General.title == "HAADF"))
 
 # %% Calculate the iDPC & dDPC images
 lowstop = 0.1  # Filter out low frequencies; must be > 0
 
-rot_angle = float(img_ac.original_metadata.CustomProperties.DetectorRotation.value) + np.pi
+try:
+    rot_angle = float(img_ac.original_metadata.CustomProperties.DetectorRotation.value) + np.pi
+except AttributeError:  # Original file might have contained individual sector images
+    try:
+        # noinspection PyUnboundLocalVariable
+        rot_angle = float(img_a.original_metadata.CustomProperties.DetectorRotation.value) + np.pi
+    except NameError:
+        rot_angle = askfloat("Detector Rotation Angle",
+                             "No detector rotation record, please input manually (radians):",
+                             initialvalue=0, minvalue=0, maxvalue=2*np.pi)
+
 
 dpc_x = img_ac * np.cos(rot_angle) - img_bd * np.sin(rot_angle)
 dpc_y = img_ac * np.sin(rot_angle) + img_bd * np.cos(rot_angle)
