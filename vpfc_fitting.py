@@ -16,6 +16,7 @@ from tkinter.filedialog import askopenfilenames, askopenfilename
 from tkinter import messagebox
 from tqdm import tqdm
 from scipy import optimize, spatial
+from itertools import combinations
 from sklearn import cluster
 
 matplotlib.use("TkAgg")  # Needed to get interactive plots in PyCharm
@@ -23,11 +24,11 @@ plt.style.use('dark_background')
 plt.rcParams.update({"figure.max_open_warning": 0})  # Suppress warnings when testing vPCF output
 
 
-def xy_to_rt(xy: tuple) -> tuple:
+def xy_to_rt(xy: tuple[float, float]) -> tuple[float, float]:
     """Convert a single point from Cartesian to polar coordinates."""
     r = np.linalg.norm(xy)
     if xy[0] == 0:
-        if xy[1] > 0:
+        if xy[1] >= 0:
             t = np.pi/2
         else:
             t = -1*np.pi/2
@@ -38,15 +39,15 @@ def xy_to_rt(xy: tuple) -> tuple:
     return r, t
 
 
-def rt_to_xy(rt: tuple) -> tuple:
+def rt_to_xy(rt: tuple[float, float]) -> tuple[float, float]:
     """Convert a single point from polar to Cartesian coordinates."""
-    x = rt[0]*np.cos(rt[1])
-    y = rt[0]*np.sin(rt[1])
+    x = float(rt[0]*np.cos(rt[1]))
+    y = float(rt[0]*np.sin(rt[1]))
     return x, y
 
 
 def polar_vpcf_peaks_from_cif(cif_path: Path | str,
-                              axes: tuple[tuple[int, int, int]],
+                              axes: tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]],
                               e: str,
                               uc_merge_tol: float = 1,
                               vpcf_tol: float = 0.5)\
@@ -71,27 +72,48 @@ def polar_vpcf_peaks_from_cif(cif_path: Path | str,
                              ignore_elements=ignore_elements,
                              reduce_proj_cell=False)
         uc.combine_prox_cols(toler=uc_merge_tol)
-    v_pcf, origin = so.v_pcf(xlim=(-6, 6), ylim=(-6, 6), d=0.01,
+    v_pcf, origin = so.v_pcf(xlim=(-10, 10), ylim=(-10, 10), d=0.01,
                              coords1=uc.at_cols.loc[uc.at_cols["elem"] == e, ["x", "y"]].to_numpy())
-    peak_origin_coordinates = extract_peak_coords(origin, v_pcf)
+    # We need to transpose the v_pcf to get the same coordinate system as the experimental peaks
+    peak_origin_coordinates = extract_peak_coords(origin, v_pcf.T)  # Default thresh & min_dist is fine for ref peaks
     merged_coordinates = merge_close(peak_origin_coordinates, vpcf_tol)
     return [xy_to_rt(xy) for xy in merged_coordinates]
 
 
-def extract_peak_coords(origin: tuple[float, float], v_pcf: np.ndarray) -> list[tuple[float, float]]:
-    peaks = np.argwhere(so.detect_peaks(v_pcf, min_dist=4))
+def mirror_polar(points: list[tuple[float, float]])\
+        -> list[tuple[float, float]]:
+    """Assumes input is in polar (r, t) coordinates, and output will also be in polar coordinates."""
+    return [(xy[0], -xy[1]) for xy in map(rt_to_xy, points)]
+
+
+def extract_peak_coords(origin: tuple[float, float],
+                        v_pcf: np.ndarray,
+                        thresh: float = 0,
+                        min_dist: int = 4) -> list[tuple[float, float]]:
+    """Extracts peak coordinates from a vPCF via max filtering.
+    Args:
+        origin: The origin of the vPCF; peak coordinates will be transformed to be centered on the origin.
+        v_pcf: The vPCF to extract peaks from.
+        thresh: Minimum pixel value allowed to be considered a peak, passed to SingleOrigin.detect_peaks (defualt=0).
+        min_dist: Minimum distance allowed between peaks, passed to SingleOrigin.detect_peaks (default=4).
+
+    Returns:
+        A list of (x, y) coordinates of peak locations, centered on the origin.
+    """
+    peaks = np.argwhere(so.detect_peaks(v_pcf, min_dist=min_dist, thresh=thresh))
     peak_origin_coordinates = [((peak[0] - origin[0]) * 0.01, (peak[1] - origin[1]) * 0.01) for peak in peaks]
     return peak_origin_coordinates
 
 
-def loss(ref_peaks, exp_kdtree):
+def loss(ref_peaks, exp_kdtree, norm):
     dists = exp_kdtree.query(ref_peaks)[0]
-    return sum([d / len(ref_peaks) for d in dists])  # Normalize by the number of points used
+    return sum([d / norm for d in dists])  # Normalize by the number of points used
 
 
 def optimize_wrapper(params: np.ndarray,
                      ref_peaks: list[tuple[float, float]],
-                     exp_kdtree: spatial.KDTree) -> float:
+                     exp_kdtree: spatial.KDTree,
+                     maxdist: float) -> float:
     """The function to be passed to scipy.optimize.minimize - performs a similarity transform then returns the loss.
     A similarity transform is a special case of an affine transform, with no shear component.
     Args:
@@ -102,12 +124,20 @@ def optimize_wrapper(params: np.ndarray,
             fit the experimental peaks as well as possible.
         exp_kdtree: A KDTree built on the experimental points, used for calculating distance between ref_peaks and
             their nearest experimental counterpart.
+        maxdist: The maximal distance from the origin that a reference point can be to still be included in fitting;
+            usually equal to the furthest distance from the origin of any peak in the experimental dataset.
     Returns:
         The loss from summing the squared distance between each experimental point and the nearest reference point.
         """
     r_scale, rot = float(params[0]), float(params[1])
+    n_exp = len(exp_kdtree.indices)
     ref_transformed = [similarity_transform(peak, r_scale, rot) for peak in ref_peaks]  # Similarity transform
-    return loss(ref_transformed, exp_kdtree)
+    ref_transformed = [pt for pt in ref_transformed if pt[0] < maxdist]  # Trim pts far from origin
+    if len(ref_transformed) < n_exp:
+        return 1e21  # Effectively infinite penalty for skipping experimental points
+        # TODO: I think there must be a better way to do this...
+    else:
+        return loss(ref_transformed, exp_kdtree, min([len(ref_transformed), n_exp]))
 
 
 def similarity_transform(polar_pt: tuple[float, float],
@@ -260,7 +290,7 @@ if test_subimages:
     test_analysis_stack(imstack)
 
 # %% Select what will be used for k-means cluster analysis
-test_vpcfs: bool = True  # Whether to show some FFTs to verify things are working as expected
+test_vpcfs: bool = True  # Whether to show some vPCFas to verify things are working as expected
 
 coords_around_point = []
 for frame in range(imstack.shape[0]):
@@ -274,9 +304,9 @@ for frame in range(imstack.shape[0]):
 lattice_copy = copy.copy(lattice)
 vpcf = []
 for i in tqdm(range(len(coords_around_point)),
-              desc="Getting subimage vPCFs", unit=" vPCFs"):
+              desc="Getting subimage vPCFs", unit="vPCFs"):
     lattice_copy.at_cols = coords_around_point[i]
-    # TODO: RESULTING vPCFs MUST BE SQUARE; set this up to do that automatically
+    # TODO: Resulting vPCFs should be square; set this up to do that automatically
     with suppress_stdout():  # Doing so many clutters the console and all the printing slows the code way down
         lattice_copy.get_vpcfs(xlim=[-1, 1],
                                ylim=[-0.679, 0.679],
@@ -295,13 +325,13 @@ if test_vpcfs:
 # %% k-means clustering
 # TODO: Maybe try DBSCAN?
 num_clusters: int = 4  # Hyperparameter for k-means: number of clusters in image
-show_kmeans_central_members: bool = False  # Whether to show representative (central) vPCFs for each k-means cluster
+show_kmeans_central_members: bool = True  # Whether to show representative (central) vPCFs for each k-means cluster
 show_kmeans_map: bool = True  # Whether to show the spatial map of k-means clusters
 
 # noinspection PyUnboundLocalVariable
 z = analysis_stack.reshape(-1, window_size**2)
 try:
-    kmeans = cluster.KMeans(n_clusters=num_clusters, random_state=0, n_init=10, verbose=1).fit(z)
+    kmeans = cluster.KMeans(n_clusters=num_clusters, random_state=0, n_init=10, verbose=0).fit(z)
 except Warning:  # TODO: I need to actually test that catching the warning this way keeps the process alive
     # If we load too much data into the k-means fitting, it will throw a bunch of resource_tracker warnings and then
     # kill the entire python process.  We'll throw an error instead to preserve the process and allow a re-try with
@@ -315,13 +345,10 @@ if show_kmeans_central_members:
     fig = plt.figure(figsize=(4*cols, 4*(1+rows//1.5)))
     for i in range(num_clusters):
         ax = fig.add_subplot(gs[i])
-        with warnings.catch_warnings():  # It's fine to ignore divide-by-zero warnings in this case
-            warnings.filterwarnings("ignore", "divide by zero encountered in log")
-            warnings.filterwarnings("ignore", "invalid value encountered in log")
-            ax.imshow(np.log(kmeans.cluster_centers_[i, :].reshape(window_size, window_size)), cmap='inferno')
+        ax.imshow(kmeans.cluster_centers_[i, :].reshape(window_size, window_size), cmap='inferno')
         ax.set_title('Cluster Center - ' + str(i + 1))
-        plt.tick_params(labelsize=18)
-        plt.axis('off')
+        ax.axes.get_xaxis().set_ticks([])
+        ax.axes.get_yaxis().set_ticks([])
     plt.show()
 
 if show_kmeans_map:
@@ -334,8 +361,12 @@ if show_kmeans_map:
     plt.show()
 
 # %% Generate total vPCFs for each cluster
-# This is technically a bit different from just the central members, and should give more positional accuracy
+# This is technically a bit different from just the central members, and should give better accuracy
 show_total_vpcfs: bool = True  # Whether to show the total vPCFs
+show_exp_peaks: bool = True  # If true, plot the located peaks over the vPCF images (show_total_vpcfs must be True)
+exp_vpcf_tol: float = 0  # Tolerance for merging nearby _experimental_ vPCF peaks; scale may differ from ref vPCFs
+exp_peak_thresh: float = 100  # Minimum pixel value allowed to count as a vPCF peak; increase to filter out noise
+exp_peak_min_dist: int = 10  # Minimum distance allowed between experimental vPCF peaks
 
 lattice_copy_2 = copy.copy(lattice)
 hrimage_2 = copy.copy(hrimage)
@@ -355,39 +386,74 @@ for i in range(labels.shape[0]):
     vpcf_clusters.append(lattice_copy_2.vpcfs[vpcf_name])
     vpcf_origins.append(lattice_copy_2.vpcfs["metadata"]["origin"])
 
+exp_peaks = []
+for vc, o in zip(vpcf_clusters, vpcf_origins):
+    peaks = np.array([xy_to_rt(pt) for pt in
+                      merge_close(extract_peak_coords(o, vc.T,
+                                                      thresh=exp_peak_thresh,
+                                                      min_dist=exp_peak_min_dist),
+                                  exp_vpcf_tol)])
+    exp_peaks.append(peaks)
+
 if show_total_vpcfs:
     fig, axs = plt.subplots(nrows=1, ncols=num_clusters, figsize=(4*num_clusters, 4))
-    for i, clust in enumerate(vpcf_clusters):
-        axs[i].imshow(clust, cmap="inferno")
+    if not show_exp_peaks:
+        for i, clust in enumerate(vpcf_clusters):
+            axs[i].imshow(clust, cmap="inferno")
+            axs[i].axes.get_xaxis().set_ticks([])
+            axs[i].axes.get_yaxis().set_ticks([])
+            axs[i].set_title('Cluster Center - ' + str(i + 1))
+    else:
+        for i, (clust, (peaks, ori)) in enumerate(zip(vpcf_clusters, zip(exp_peaks, vpcf_origins))):
+            axs[i].imshow(clust, cmap="inferno")
+            axs[i].axes.get_xaxis().set_ticks([])
+            axs[i].axes.get_yaxis().set_ticks([])
+            axs[i].scatter(ori[0], ori[1], marker="+", c="#ffffff", s=30)
+            # Transform exp_peaks back to image coordinates
+            ps = np.array([rt_to_xy(p) for p in peaks])
+            p_x, p_y = ps[:, 0], ps[:, 1]
+            pxs = [p/0.01+ori[0] for p in p_x]
+            pys = [p/0.01+ori[1] for p in p_y]
+            axs[i].scatter(pxs, pys, marker="+", c="#fe6100", s=20)
+            axs[i].set_title('Experimental Peaks - ' + str(i + 1))
+
 
 # %% Generate vPCF coordinates for the perfect structures
-test_refs: bool = False  # Set this to enable displaying coordinate plots (for debugging)
 uc_tol: float = 1  # Tolerance for merging nearby atom columns in the projected unit cell (A)
 vpcf_tol: float = 0.5  # Tolerance for merging nearby vPCF peaks (A)
 
 # Tuples are (zone axis vector, basis vector 2, basis vector 3)
-zones = [((0, 0, 1), (10, 0, 0), (0, 10, 0)),
-         ((0, 1, 0), (10, 0, 0), (0, 0, -10)),
-         ((1, 0, 0), (0, 0, -10), (0, 10, 0)),
-         ((1, 1, 0), (10, -10, 0), (0, 0, -10)),
-         ((1, 0, 1), (10, 0, -10), (0, -10, 0)),
-         ((0, 1, 1), (0, -10, 10), (10, 0, 0)),
-         ((1, 1, 1), (10, 0, -10), (-10, 20, -10))]
+zones = [((0, 0, 1), (5, 0, 0), (0, 5, 0)),
+         ((0, 1, 0), (5, 0, 0), (0, 0, -5)),
+         ((1, 0, 0), (0, 0, -5), (0, 5, 0)),
+         ((1, 1, 0), (5, -5, 0), (0, 0, -5)),
+         ((1, 0, 1), (5, 0, -5), (0, -5, 0)),
+         ((0, 1, 1), (0, -5, 5), (5, 0, 0)),
+         ((1, 1, 1), (5, 0, -5), (-5, 10, -5))]
 
-_temp_mapping = {(fname, axes): None for fname in file_list for axes in zones}  # TODO: May not need to be a dict?
+_temp_mapping = [(fname, axes) for fname in file_list for axes in zones]
 struct_mapping = {}
-for mapping in tqdm(_temp_mapping.keys(),
-                    desc="Generating refernce vPCFs", unit=" vPCFs"):
-    # TODO: Compress the mapping (merge indistinguishable vPCFs under a single key) -- work in _temp_mapping?
+for mapping in tqdm(_temp_mapping, desc="Generating refernce vPCFs", unit="vPCF"):
     map_name = str((mapping[0].stem, mapping[1][0]))
     struct_mapping[map_name] = polar_vpcf_peaks_from_cif(mapping[0], mapping[1], "Hf",
                                                          uc_merge_tol=uc_tol, vpcf_tol=vpcf_tol)
 del _temp_mapping
 
+# %% Supplement (chirality) and filter (indistinguishability) reference vPCFs
+test_refs: bool = False  # Set this to enable displaying coordinate plots (useful for debugging)
+equiv_tol: int = 1  # Tolerance to merge indistinguishable vPCFs, in terms of number of decimal places (per pt)
+
+_temp_mapping = {}
+for name in list(struct_mapping.keys()):
+    _temp_mapping[f"{name}_m"] = mirror_polar(struct_mapping[name])
+struct_mapping = struct_mapping | _temp_mapping
+del _temp_mapping
+
+# TODO: I need to think of a better way to merge vPCFs; why didn't the optimize method work?
+
 if test_refs:  # Plot one of the phase-and-zones to check if things are working
     for struct_map in struct_mapping.items():
         peaks = struct_map[1]
-
         fig = plt.figure()
         ax = fig.add_subplot(projection="polar")
         ax.set_rlim(rmin=0, rmax=np.ceil(np.max(np.array(list(peaks))[:, 0])))
@@ -397,26 +463,34 @@ if test_refs:  # Plot one of the phase-and-zones to check if things are working
         fig.show()
 
 # %% Fit modeled vPCFs to total vPCFs
-exp_vpcf_tol: float = 0.25  # Tolerance for merging nearby _experimental_ vPCF peaks; scale may differ from ref vPCFs
-r_scale_bounds = (0.1, None)  # Lower and upper bounds on how much the optimization can radially scale peak positions
+r_scale_bounds = (0, None)  # Lower and upper bounds on how much the optimization can radially scale peak positions
 rot_bounds = (0, 2*np.pi)  # Lower and upper bounds on how much the optimization can rotate the peak positions
-max_num_peaks: int = 1000  # Maximum number of peaks to use in fitting (prioritizes peaks nearest to the origin)
-temperature: float = 0  # The "temperature" for basin hopping: higher allows larger jumps in loss
+temperature: float = 10  # The "temperature" for basin hopping: higher allows larger jumps in loss
 
 optimization_results = []
-for i, (vc, o) in enumerate(zip(vpcf_clusters, vpcf_origins)):
+for i, experimental in enumerate(exp_peaks):
     optimized = {}
-    exp_peaks = np.array([xy_to_rt(pt) for pt in merge_close(extract_peak_coords(o, vc), exp_vpcf_tol)])
-    exp_kdtree = spatial.KDTree(exp_peaks)
-    for key, ref_peaks in struct_mapping.items():
-        ref_peaks = ref_peaks[:len(exp_peaks)]
-        # TODO: There's no penalty for missing ref peaks, so it's fitting everything to Ortho (P) 111
+    exp_kdtree = spatial.KDTree(experimental)
+    max_dist = np.max(experimental[:, 0])
+    for key, ref_peaks in tqdm(struct_mapping.items(),
+                               desc=f"Fitting experimental vPCF {i+1}/{len(vpcf_origins)}", unit="refs"):
+        # TODO: pre-filter on smallest rel. dist.:
+        # Get ref dists. w/ cdist
+        # Find smallest entry above the diagonal
+        # Normalize by smallest dist to origin (scaling normalization)
+        # Do the same thing for exp. points (use the tree?)
+        # If smallest normed dist in ref is << smallest normed dist in exp, skip that ref.
+
+        # noinspection PyTypeChecker
+        ref_dists = scidist.cdist(ref_peaks, ref_peaks, metric="euclidean")
+
         optimized[key] = optimize.basinhopping(optimize_wrapper,
-                                               np.array([1, np.pi]),
+                                               np.array([0, 0]),
                                                T=temperature,
-                                               minimizer_kwargs={"method": "L-BFGS-B",
+                                               minimizer_kwargs={"method": "Nelder-Mead",
                                                                  "bounds": (r_scale_bounds, rot_bounds),
-                                                                 "args": (ref_peaks, exp_kdtree)})
+                                                                 "args": (ref_peaks, exp_kdtree, max_dist)},
+                                               niter=20)
     optimization_results.append(optimized)
 
 # Find the best fitting result for each vPCF and store for plotting
@@ -428,20 +502,37 @@ for i, res in enumerate(optimization_results):
             best_fit = ref_fit[1]["fun"]
             best_fitting = ref_fit[0]
         elif np.isclose(ref_fit[1]["fun"], best_fit):
-            warnings.warn("Multiple best fits!  Returning first result.")
-    print(f"Best fit for experimental vPCF {i} is {best_fitting} with loss {best_fit}.")
+            warnings.warn("Multiple best fits!  Returning first result.")  # optimization_results still has all values
+    print(f"Best fit for experimental vPCF {i} is {best_fitting} with loss {best_fit:.8f}.")
     best_fitted[i] = (best_fitting, res[best_fitting])
 
 # %% Plot best-fitting vPCF peaks with experimental vPCFs
 for i, fitted in enumerate(best_fitted.keys()):
     ref_pts = [rt_to_xy(similarity_transform(pt, best_fitted[fitted][1]["x"][0], best_fitted[fitted][1]["x"][1]))
                for pt in struct_mapping[best_fitted[fitted][0]]]
-    exp_pts = merge_close(extract_peak_coords(vpcf_origins[i], vpcf_clusters[i]), exp_vpcf_tol)
-
     fig, ax = plt.subplots()
-    ax.scatter(np.array(ref_pts)[:, 0], np.array(ref_pts)[:, 1], label=f"Reference: {best_fitted[fitted][0]}")
-    ax.scatter(np.array(exp_pts)[:, 0], np.array(exp_pts)[:, 1], label="Experimental")
+    exp_xy = [rt_to_xy(pt) for pt in exp_peaks[i]]
+    ax.scatter(np.array(ref_pts)[:, 0], np.array(ref_pts)[:, 1],
+               label=f"Reference: {best_fitted[fitted][0]}", c="#785ef0")
+    ax.scatter(np.array(exp_xy)[:, 0], np.array(exp_xy)[:, 1],
+               label="Experimental", c="#fe6100")
     fig.legend()
     fig.show()
+
+# %% Plot loss distributions
+cmap_min = min([opt["fun"] for res in optimization_results for opt in res.values()])
+cmap_max = max([opt["fun"] for res in optimization_results for opt in res.values()])
+fig, axs = plt.subplots(1, 4, sharey="all")
+cmap = plt.get_cmap("RdYlGn_r")
+axs[0].set_ylabel("Loss (a.u.)")
+axs[0].set_ylim((0, 0.5))
+for i, res in enumerate(optimization_results):
+    axs[i].set_xticks([])
+    axs[i].spines[["bottom", "top", "right"]].set_visible(False)
+    for j, (phase_orientation, opt) in enumerate(sorted(res.items(), key=lambda x: x[1]["fun"])):
+        axs[i].bar(x=j, height=opt["fun"],
+                   color=cmap((opt["fun"] - cmap_min) / (cmap_max - cmap_min)))
+        axs[i].set_title(f"Experimental\nvPCF {i}")
+fig.show()
 
 # %%

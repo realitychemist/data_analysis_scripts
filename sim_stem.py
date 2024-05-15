@@ -152,9 +152,9 @@ if __name__ == "__main__":
     # This can either be done like this (in the script) or in a configuration file to use the same settings
     #   for all scripts in a given python environment
     abtem.config.set({"device":              "gpu",  # Configure abTEM to run on the GPU
-                      "dask.lazy":           True,  # Setting to False can be useful for debugging
+                      "dask.lazy":           False,  # Setting to False can be useful for debugging
                       "dask.chunk-size":     "128 MB",  # Standard L3 cache size (per core)
-                      "dask.chunk-size-gpu": "2048 MB"})  # Remember to leave space for overhead
+                      "dask.chunk-size-gpu": "1024 MB"})  # Remember to leave space for overhead
 
     # noinspection PyTypeChecker
     result = simulate_stem(potential=_test_potential(),
@@ -168,5 +168,7 @@ if __name__ == "__main__":
 
     # Should generate and show 4 images of the test potential if everything went well
     preview_stem_result(result, ["HAADF", "Flex (HABF)", "DF4 (Sum)", "iCOM"])
+
+#%%
 
 #%%
