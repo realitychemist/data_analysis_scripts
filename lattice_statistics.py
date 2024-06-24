@@ -86,14 +86,14 @@ load_method: Literal[
     "mp_api"  # Load a cif from Materials Project; requires an API key!
     ] = "fixed"
 
-fixed_path = Path("E:/Users/Charles/BZT.cif")  # Local path to .cif file
-mp_id = "mp-661"  # Materials Project ID for desired structure, including the leading "mp-"
+fixed_path = Path("E:/Users/Charles/AlN.cif")  # Local path to .cif file
+mp_id = "mp-5229"  # Materials Project ID for desired structure, including the leading "mp-"
 
 origin_shift: tuple[float, float, float] = (0, 0, 0)  # Set to shift the unit cell origin of the structure on load
 # To relabel atomic sites in the unit cell on load, set as a dict from default label to new label
 # If there are no sites to relabel, leave the dictionary empty
 # This is mainly cosmetic (affect label in vPCF plots)
-replacement_labels: dict[str, str] = {"Ti": "Ti/Zr"}
+replacement_labels: dict[str, str] = {"Al": "Al/Gd"}
 
 match load_method:
     case "fixed":
@@ -119,10 +119,10 @@ for key, replacement in replacement_labels.items():
 # %% Project the unit cell along a given zone axis
 plot_projected_cell: bool = True  # Set True to pop up a visualization of the projected unit cell for verification
 
-uc.project_zone_axis((0, 0, 1),  # Zone axis direction
-                     (1, 0, 0),  # Apparent horizontal axis in projection
-                     (0, 1, 0),  # Most vertical axis in projection
-                     ignore_elements=["O"]  # List of elements to ignore (e.g. light elements in a HAADF image)
+uc.project_zone_axis((1, 1, 0),  # Zone axis direction
+                     (1, -1, 0),  # Apparent horizontal axis in projection
+                     (0, 0, 1),  # Most vertical axis in projection
+                     ignore_elements=["N"]  # List of elements to ignore (e.g. light elements in a HAADF image)
                      )
 uc.combine_prox_cols(toler=1e-2)  # 1e-2 works well as a tolerance, but adjust as needed
 
@@ -132,7 +132,7 @@ if plot_projected_cell:
 # %% Create the SingleOrigin HRImage object
 hr_img = so.HRImage(img)
 # noinspection PyTypeChecker
-lattice = hr_img.add_lattice("BZT",  # Human-readable name for the lattice in the image
+lattice = hr_img.add_lattice("AlN",  # Human-readable name for the lattice in the image
                              uc,
                              origin_atom_column=None)  # Index in uc of column to use as fitting origin, None == default
 
@@ -142,31 +142,33 @@ lattice = hr_img.add_lattice("BZT",  # Human-readable name for the lattice in th
 # If some FFT peaks are weak or absent (such as forbidden reflections), specify the order of the first peak that
 # is clearly visible
 lattice.fft_get_basis_vect(a1_order=1,  # Order of peak corresponding to planes in the most horizontal direction
-                           a2_order=1)  # Order of peak corresponding to planes in the most vertical direction
+                           a2_order=2)  # Order of peak corresponding to planes in the most vertical direction
 lattice.define_reference_lattice()
 
 # %% Fit the atom columns
-lattice.fit_atom_columns(buffer=10,  # Pixel buffer around image edges to avoid partial columns
-                         local_thresh_factor=0.0,  # Watershed segmentation threshold
+lattice.fit_atom_columns(buffer=1,  # Pixel buffer around image edges to avoid partial columns
+                         local_thresh_factor=0,  # Watershed segmentation threshold
                          use_background_param=True,  # Fit the background intensity
                          use_bounds=True,  # Bound allowed column fit position
-                         use_circ_gauss=False,  # Force gaussians to be circular (major axis == minor axis)
+                         pos_bound_dist=0.3,  # Position fit shift limit (Angstrom)
+                         use_circ_gauss=True,  # Force gaussians to be circular (major axis == minor axis)
                          parallelize=True,  # Parallelize the computation
-                         peak_grouping_filter="auto",  # Apply a filter for simultaneous column fitting
+                         peak_grouping_filter=None,  # Apply a filter for simultaneous column fitting
                          peak_sharpening_filter="auto")  # Apply a filter to improve column position fitting
+
 
 # Must have only one column per projected unit cell.  If no sublattice meets this criteria, specify a specific column
 # in the projected cell.
 lattice.refine_reference_lattice(filter_by="elem",  # Which dataframe column to select on
-                                 sites_to_use="Ba")  # Which entry to select
+                                 sites_to_use="Al/Gd")  # Which entry to select
 
 # %% Assess fit quality
 # All of these steps are optional but can help with assessing a failed fit; uncomment desired lines
 # See function documentation for param descriptions
 assess_masks: bool = False
-assess_positions: bool = False
+assess_positions: bool = True
 assess_residuals: bool = False
-assess_displacement: bool = False
+assess_displacement: bool = True
 
 if assess_masks:
     lattice.show_masks()
@@ -175,14 +177,14 @@ if assess_positions:
 if assess_residuals:
     _ = lattice.get_fitting_residuals()
 if assess_displacement:
-    hr_img.plot_disp_vects(sites_to_plot=["Ba"], arrow_scale_factor=2)
+    hr_img.plot_disp_vects(sites_to_plot=["Al/Gd"], arrow_scale_factor=2)
 
 # %% Setup vPCFs
-hr_img, _ = hr_img.rotate_image_and_data("BZT", "a1", "horizontal")
-lattice = hr_img.latt_dict["BZT"]
+hr_img, _ = hr_img.rotate_image_and_data("AlN", "a1", "horizontal")
+lattice = hr_img.latt_dict["AlN"]
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
-column_labels: set = {"Ba", "Ti/O"}  # Which columns to generate vPCFs for (usually element names)
+column_labels: set = {"Al/Gd"}  # Which columns to generate vPCFs for (usually element names)
 xlimits, ylimits = (-1.05, 1.05), (-1.05, 1.05)  # Limits for vPCF plotting (unit cells)
 
 lattice.get_vpcfs(xlim=xlimits, ylim=ylimits, d=pxsize,
@@ -198,7 +200,7 @@ combos = [tuple(string.split("-")) for string in combos]
 plot_ref: bool = True  # If true, plot reference lattice points
 # Adjust min and max values to get the desired level of color saturation on the vPCFs
 minval: int = 0
-maxval: int = 1000
+maxval: int = 100
 
 # These colors come from the IBM colorblind palette and should have okay contrast even in grayscale
 basic_colors = {"green":   "#117733ff",
@@ -257,14 +259,13 @@ lattice.get_vpcf_peak_params()
 nn_dists = {}
 for combo in combos:
     if combo[0] == combo[1]:
-        n_peaks = 2
+        n_peaks = 4
     else:
         n_peaks = 4
     nn_dists[combo] = lattice.plot_distances_from_vpcf_peak(f"{combo[0]}-{combo[1]}",
                                                             number_of_peaks_to_pick=n_peaks,
                                                             deviation_or_absolute="deviation",
                                                             return_nn_list=True)
-
 
 # %% Generate nearest-neighbor distance histograms (per sublattice)
 # TODO: Instead of finding the neighbors again, use the NN-distances list from the previous cell

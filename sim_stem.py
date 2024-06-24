@@ -170,5 +170,3 @@ if __name__ == "__main__":
     preview_stem_result(result, ["HAADF", "Flex (HABF)", "DF4 (Sum)", "iCOM"])
 
 #%%
-
-#%%
