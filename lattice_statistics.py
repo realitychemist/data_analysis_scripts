@@ -18,7 +18,7 @@ from warnings import warn
 # from pymatgen.io.ase import AseAtomsAdaptor
 # from data_analysis_scripts.cse_secrets import MP_API_KEY
 
-if version("hyperspy") > "1.7.6":
+if version("hyperspy") > "2.0rc0":
     warn("File IO was deprecated in HyperSpy versions 2.0rc0 and beyond; .emd file importing will not work.")
 
 matplotlib.use("TkAgg")
@@ -146,12 +146,11 @@ lattice.fft_get_basis_vect(a1_order=1,  # Order of peak corresponding to planes 
 lattice.define_reference_lattice()
 
 # %% Fit the atom columns
-lattice.fit_atom_columns(buffer=1,  # Pixel buffer around image edges to avoid partial columns
-                         local_thresh_factor=0,  # Watershed segmentation threshold
-                         use_background_param=True,  # Fit the background intensity
+lattice.fit_atom_columns(buffer=10,  # Pixel buffer around image edges to avoid partial columns
+                         bkgd_thresh_factor=0,  # Watershed segmentation threshold
                          use_bounds=True,  # Bound allowed column fit position
                          pos_bound_dist=0.3,  # Position fit shift limit (Angstrom)
-                         use_circ_gauss=True,  # Force gaussians to be circular (major axis == minor axis)
+                         use_circ_gauss=False,  # Force gaussians to be circular (major axis == minor axis)
                          parallelize=True,  # Parallelize the computation
                          peak_grouping_filter=None,  # Apply a filter for simultaneous column fitting
                          peak_sharpening_filter="auto")  # Apply a filter to improve column position fitting
@@ -180,12 +179,12 @@ if assess_displacement:
     hr_img.plot_disp_vects(sites_to_plot=["Al/Gd"], arrow_scale_factor=2)
 
 # %% Setup vPCFs
-hr_img, _ = hr_img.rotate_image_and_data("AlN", "a1", "horizontal")
-lattice = hr_img.latt_dict["AlN"]
+hr_img = hr_img.rotate_image_and_data("AlN", "a1", "right")
+lattice = hr_img.latt_dict["AlN_rot"]  # TODO: SO GitHub issue - I don't think rotation should overwrite old lattice
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
 column_labels: set = {"Al/Gd"}  # Which columns to generate vPCFs for (usually element names)
-xlimits, ylimits = (-1.05, 1.05), (-1.05, 1.05)  # Limits for vPCF plotting (unit cells)
+xlimits, ylimits = (-1.1, 1.1), (-1.1, 1.1)  # Limits for vPCF plotting (unit cells)
 
 lattice.get_vpcfs(xlim=xlimits, ylim=ylimits, d=pxsize,
                   get_only_partial_vpcfs=(not pair_pair),
@@ -200,7 +199,7 @@ combos = [tuple(string.split("-")) for string in combos]
 plot_ref: bool = True  # If true, plot reference lattice points
 # Adjust min and max values to get the desired level of color saturation on the vPCFs
 minval: int = 0
-maxval: int = 100
+maxval: int = 80
 
 # These colors come from the IBM colorblind palette and should have okay contrast even in grayscale
 basic_colors = {"green":   "#117733ff",
@@ -221,9 +220,9 @@ if plot_ref:  # Generate the reference vPCFs if needed
                       * lattice.pixel_size_est for lab in column_labels}
     ref_xlimits = (xlimits[0]*lattice.a_2d[0][0], xlimits[1]*lattice.a_2d[0][0])
     ref_ylimits = (ylimits[0]*lattice.a_2d[1][1], ylimits[1]*lattice.a_2d[1][1])
-    ref_vpcfs = {combo: so.v_pcf(coords1=ref_coord_dict[combo[0]],
-                                 coords2=ref_coord_dict[combo[1]],
-                                 xlim=ref_xlimits, ylim=ref_ylimits, d=pxsize)
+    ref_vpcfs = {combo: so.get_vpcf(coords1=ref_coord_dict[combo[0]],
+                                    coords2=ref_coord_dict[combo[1]],
+                                    xlim=ref_xlimits, ylim=ref_ylimits, d=pxsize)
                  for combo in combos}
 
 vpcf_fig, vpcf_ax = plt.subplots()
@@ -259,7 +258,7 @@ lattice.get_vpcf_peak_params()
 nn_dists = {}
 for combo in combos:
     if combo[0] == combo[1]:
-        n_peaks = 4
+        n_peaks = 1
     else:
         n_peaks = 4
     nn_dists[combo] = lattice.plot_distances_from_vpcf_peak(f"{combo[0]}-{combo[1]}",

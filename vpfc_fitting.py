@@ -344,7 +344,7 @@ def coarse_search(bounds: tuple[tuple[float, float], tuple[float, float]],
 def simplex_refine(pts: list[tuple[float, float]], tree: spatial.KDTree, good_fit_tol: float,
                    r_init: float, t_init: float, lookaround: tuple[float, float],
                    alpha: float = 1, gamma: float = 2, rho: float = 0.5, sigma: float = 0.5,
-                   break_thresh: float = 1e-5, break_iter: int = 30, max_iter: int = 10000,
+                   break_thresh: float = 1e-4, break_iter: int = 30, max_iter: int = 10000,
                    r_bounds: tuple[float, float] | None = None, t_bounds: tuple[float, float] | None = None,
                    return_track: bool = False)\
         -> tuple[float, float] | tuple[float, float, list[tuple[float, float, float]]]:
@@ -364,7 +364,7 @@ def simplex_refine(pts: list[tuple[float, float]], tree: spatial.KDTree, good_fi
             the centroid. Default is 0.5.
         sigma: Shrink coefficient (must be between 0 and 1). Larger values shrink the simplex _less_. Default is 0.5.
         break_thresh: The threshold for per-iteration improvement; the search terminates if the improvement is less
-            than this value for `break_iter` iterations. Default is 1e-5.
+            than this value for `break_iter` iterations. Default is 1e-4.
         break_iter: The number of iterations after which - if improvements are below the threshold value - the search
             will terminate. Default is 30.
         max_iter: The absolute maximum number of iterations allowed. If the loop breaks this way, a warning message
@@ -401,26 +401,20 @@ def simplex_refine(pts: list[tuple[float, float]], tree: spatial.KDTree, good_fi
 
     # Create initial simplex
     x0 = (r_init, t_init, loss((r_init, t_init), pts, tree, good_fit_tol))
-    if return_track:  # Initialize the track with the initial guess
-        track = [x0]
     x1 = (r_init + lookaround[0], t_init, loss((r_init + lookaround[0], t_init), pts, tree, good_fit_tol))
     x2 = (r_init, t_init + lookaround[1], loss((r_init, t_init + lookaround[1]), pts, tree, good_fit_tol))
     simplex = [x0, x1, x2]
+    track = []  # Will only be used if return_track is True
 
     # Iteration
     total_iter = -1
     iter_without_improvement = 0  # Used in termination check
     while True:
-        # Sort simplex vertices
+        # Sort simplex vertices by loss
         simplex = sorted(simplex, key=lambda x: x[-1])
 
-        # Append to the track
         if return_track:
-            # noinspection PyUnboundLocalVariable
-            if len(track) == 1 and not track[0] == x0:  # Only append on first pass if x1 or x2 is better than x0
-                track.append(simplex[0])
-            elif len(track) > 1:  # Future iterations always append
-                track.append(simplex[0])
+            track.append(simplex[0])
 
         # Check for convergence / termination
         total_iter += 1
@@ -530,7 +524,7 @@ lattice = hrimage.add_lattice("lattice", uc)
 lattice.get_roi_mask_polygon()
 
 # %% Fit lattice to image, and refine
-plot_fit_lattice: bool = True  # Whether to plot the fit lattice, to make sure column positions look right
+plot_fit_lattice: bool = False  # Whether to plot the fit lattice, to make sure column positions look right
 
 lattice.fft_get_basis_vect(a1_order=4, a2_order=4, sigma=3)
 lattice.define_reference_lattice(plot_ref_lattice=False)
@@ -595,7 +589,7 @@ if test_vpcfs:
 # TODO: Maybe try DBSCAN?
 num_clusters: int = 4  # Hyperparameter for k-means: number of clusters in image
 show_kmeans_central_members: bool = False  # Whether to show representative (central) vPCFs for each k-means cluster
-show_kmeans_map: bool = True  # Whether to show the spatial map of k-means clusters
+show_kmeans_map: bool = False  # Whether to show the spatial map of k-means clusters
 
 z = analysis_stack.reshape(-1, window_size**2)
 try:
@@ -639,6 +633,8 @@ show_exp_peaks: bool = True  # If true, plot the located peaks over the vPCF ima
 exp_vpcf_tol: float = 0  # Tolerance for merging nearby _experimental_ vPCF peaks; scale may differ from ref vPCFs
 exp_peak_thresh: float = 100  # Minimum pixel value allowed to count as a vPCF peak; increase to filter out noise
 exp_peak_min_dist: int = 10  # Minimum distance allowed between experimental vPCF peaks
+
+# TODO: Something seems to have broken here, the identified experimental vPCF peaks are not quite in the right place...
 
 lattice_copy_2 = copy(lattice)
 hrimage_2 = copy(hrimage)
@@ -738,7 +734,7 @@ if test_refs:
 # %% Fit modeled vPCFs to total vPCFs
 r_scale_bounds: tuple[float, float] = (0.5, 7)  # Lower and upper bounds on scaling
 rot_bounds: tuple[float, float] = (0, 2*np.pi)  # Lower and upper bounds on rotation
-good_fit_tol: float = 5e-5  # User-specified goodness-of-fit parameter; approx. expected mean dist. when fit is good
+good_fit_tol: float = 5e-2  # User-specified goodness-of-fit parameter; approx. expected mean dist. when fit is good
 dmax_prefactor: int = 100  # Prefactor for d_max when fit is poor (and for initial/coarse search); should be large-ish
 # Zhang 1993 uses 20 as their prefactor, but for this application probably higher (initial mismatch may be large)
 
@@ -746,17 +742,24 @@ dmax_prefactor: int = 100  # Prefactor for d_max when fit is poor (and for initi
 # IMPORTANT NOTE # Currently set up to match reference vPCFs with themselves
 ##################
 
-print("Fitting (global, coarse)...")
+print("Fitting (global)...")
 scale_init, rot_init, _, loss_map = coarse_search((r_scale_bounds, rot_bounds), 500, 500,
                                                   struct_mapping["('Monoclinic', (1, 0, 1))"],
                                                   reference_forest["('Monoclinic', (1, 0, 1))"],
                                                   good_fit_tol, return_all=True)
 
 print("Refining (local)...")
-r_fit, t_fit, track = simplex_refine(struct_mapping["('Monoclinic', (1, 0, 1))"],
-                                     reference_forest["('Monoclinic', (1, 0, 1))"],
-                                     good_fit_tol, scale_init, rot_init, (0.1, 0.1),
-                                     r_bounds=r_scale_bounds, t_bounds=rot_bounds, return_track=True)
+# r_fit, t_fit, track = simplex_refine(struct_mapping["('Monoclinic', (1, 0, 1))"],
+#                                      reference_forest["('Monoclinic', (1, 0, 1))"],
+#                                      good_fit_tol, scale_init, rot_init, (-0.1, -0.1),
+#                                      alpha=0.1, gamma=1.1, rho=0.1, sigma=0.1,
+#                                      r_bounds=r_scale_bounds, t_bounds=rot_bounds, return_track=True)
+optimized = optimize.minimize(loss,
+                              x0=np.array([scale_init, rot_init]),
+                              args=(struct_mapping["('Monoclinic', (1, 0, 1))"],
+                                    reference_forest["('Monoclinic', (1, 0, 1))"],
+                                    good_fit_tol, False),
+                              method="Nelder-Mead", bounds=(r_scale_bounds, rot_bounds))
 print("Done!")
 
 # %% Plotting function for debugging: view the loss landscape (based on coarse search)
@@ -809,12 +812,26 @@ for i, fitted in enumerate(best_fitted.keys()):
     exp_xy = [rt_to_xy(similarity_transform(pt, r_scale, rot)) for pt in list(struct_mapping.values())[i]]
     fig, ax = plt.subplots()
 
-    ax.scatter(np.array(ref_xy)[:, 0], np.array(ref_xy)[:, 1],
+    ax.scatter(np.array(ref_xy)[:, 0], np.array(ref_xy)[:, 1], marker="x",
                label=f"Reference: {best_fitted[fitted][0]}", c="#785ef0")
-    ax.scatter(np.array(exp_xy)[:, 0], np.array(exp_xy)[:, 1],
+    ax.scatter(np.array(exp_xy)[:, 0], np.array(exp_xy)[:, 1], marker="+",
                label="Experimental", c="#fe6100")
     fig.legend()
     fig.show()
+
+# %% Plot loss grid
+grid = np.array([[res["fun"] for res in ress.values()] for ress in optimization_results])
+symmetry = np.ones(grid.shape)
+for i in range(grid.shape[0]):
+    for j in range(grid.shape[1]):
+        fst, snd = grid[i][j], grid[j][i]
+        if not np.isclose(fst, snd, atol=0.1):
+            symmetry[i][j] = 0
+fig, axs = plt.subplots(1, 2)
+axs[0].imshow(grid, cmap="cividis", origin="lower")
+axs[1].imshow(symmetry, cmap="cividis", origin="lower")
+# plt.colorbar()
+plt.show()
 
 # %% Plot loss distributions
 cmap_min = min([opt["fun"] for res in optimization_results for opt in res.values()])

@@ -229,17 +229,16 @@ prms = PACBEDPrms(
         convergence=17.9,
         sampling=0.1,
         zone=(1, 1, 0),
-        tiling=(27, 30),
+        tiling=(18, 20),
         max_angle=50,
         thickness=200,
-        thickness_step=200,
+        thickness_step=20,
         slice_thickness=2,
         phonon_configs=0,
         phonon_sigmas={"Al": 0.0567,  # DOI: 10.1107/S0108767309004966
-                       "Sc": 0.0567,  # No good source for this, assuming the same as Al
                        "N":  0.0593},
         seed=None,
-        tilt_mag=50,
+        tilt_mag=0,
         tilt_angle=float(np.radians(90)))  # Auto-convert degrees to radians
 
 # %% Low-level configuration settings
@@ -247,7 +246,7 @@ prms = PACBEDPrms(
 abtem.config.set({"device": prms.device,
                   "dask.lazy": True,  # Setting to False can be useful for debugging
                   "dask.chunk-size": "128 MB",  # Standard L3 cache size (per core)
-                  "dask.chunk-size-gpu": "4096 MB"})  # Remember to leave space for overhead
+                  "dask.chunk-size-gpu": "2048 MB"})  # Remember to leave space for overhead
 
 if prms.device == "gpu":  # If running on the GPU, Dask needs to be configured
     if system() == "Linux":  # If we're on Linux we can use multiple GPUs
@@ -331,7 +330,6 @@ for za, tile in zip(prms.zone, prms.tiling):
         atoms *= (tile, tile, 1)
     elif type(tile) is tuple:
         atoms *= (tile[0], tile[1], 1)
-    view(atoms)
 
     if prms.phonon_configs != 0:
         configs = abtem.FrozenPhonons(atoms,
