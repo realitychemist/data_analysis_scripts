@@ -292,7 +292,7 @@ def loss(params: tuple[float, float],
         if len(ds) == 0:
             return np.inf
         else:
-            return sum(ds) / len(ds)
+            return sum(ds)
 
     except ValueError:
         # Some optimize methods (e.g. L-BFGS-B) seem to occasionally try (nan, nan) as fit parameters
@@ -632,7 +632,7 @@ show_total_vpcfs: bool = True  # Whether to show the total vPCFs
 show_exp_peaks: bool = True  # If true, plot the located peaks over the vPCF images (show_total_vpcfs must be True)
 exp_vpcf_tol: float = 0  # Tolerance for merging nearby _experimental_ vPCF peaks; scale may differ from ref vPCFs
 exp_peak_thresh: float = 100  # Minimum pixel value allowed to count as a vPCF peak; increase to filter out noise
-exp_peak_min_dist: int = 10  # Minimum distance allowed between experimental vPCF peaks
+exp_peak_min_dist: int = 2  # Minimum distance allowed between experimental vPCF peaks
 
 # TODO: Something seems to have broken here, the identified experimental vPCF peaks are not quite in the right place...
 
@@ -825,7 +825,7 @@ symmetry = np.ones(grid.shape)
 for i in range(grid.shape[0]):
     for j in range(grid.shape[1]):
         fst, snd = grid[i][j], grid[j][i]
-        if not np.isclose(fst, snd, atol=0.1):
+        if not np.isclose(fst, snd, atol=0.001):
             symmetry[i][j] = 0
 fig, axs = plt.subplots(1, 2)
 axs[0].imshow(grid, cmap="cividis", origin="lower")
@@ -842,7 +842,7 @@ median = np.median([opt["fun"] for res in optimization_results for opt in res.va
 fig, axs = plt.subplots(1, len(struct_mapping), sharey="all")
 cmap = plt.get_cmap("RdYlGn_r")
 axs[0].set_ylabel("Loss (a.u.)")
-axs[0].set_ylim((0, median*1.1))
+# axs[0].set_ylim((0, median*1.1))
 for i, res in enumerate(optimization_results):
     axs[i].set_xticks([])
     axs[i].spines[["bottom", "top", "right"]].set_visible(False)

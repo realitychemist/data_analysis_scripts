@@ -1,93 +1,105 @@
+import copy
 from pathlib import Path
 from tkinter.filedialog import askopenfilename, asksaveasfilename
-from itertools import combinations
 from typing import Literal
+from tifffile import imread
+from warnings import warn
+
+from itertools import combinations
 import numpy as np
+import SingleOrigin as so
+from scipy.stats import describe, gaussian_kde, shapiro
+import pandas as pd
+
+import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.patches import Patch
-import quickcrop as qc
-import SingleOrigin as so
-import matplotlib
-from tifffile import imread
-from importlib.metadata import version
-import hyperspy.api as hs
-from scipy.stats import describe
-from warnings import warn
-# from mp_api.client import MPRester
-# from pymatgen.io.ase import AseAtomsAdaptor
-# from data_analysis_scripts.cse_secrets import MP_API_KEY
-
-if version("hyperspy") > "2.0rc0":
-    warn("File IO was deprecated in HyperSpy versions 2.0rc0 and beyond; .emd file importing will not work.")
-
 matplotlib.use("TkAgg")
 plt.style.use('dark_background')
 
+########################
+#        PART 0        #
+# Function Definitions #
+########################
 
-def _minmax_norm(img):
+
+def minmax_norm(img):
+    """Normalize a 2D array into the range [0, 1]"""
+    # Underscores avoid overwriting reserved names
     _min, _max = np.min(img), np.max(img)
-    normed = (img - _min) / (_max - _min)
-    return normed
+    return (img - _min) / (_max - _min)
 
 
-def nn_distances(origin_lat: np.ndarray, dest_lat: np.ndarray, pixel_size: float)\
-        -> np.ndarray:
-    # position array column order is: x_fit, y_fit, u, v
-    distances = []
-    for origin in origin_lat:
-        u, v = origin[2], origin[3]
-        # Get nearest neighbors
-        # TODO: For non-orthogonal lattices, this rook-style neighborhood might not always return all nearest neighbors
-        # (a proper solution probably involves using a kD tree to find all neighbors with a given cutoff,
-        #  but that approach will be both more complex and, probably, slower)
-        if origin_lat is dest_lat:
-            a = dest_lat[(dest_lat[:, 2] == u+1) & (dest_lat[:, 3] == v), :2]
-            b = dest_lat[(dest_lat[:, 2] == u-1) & (dest_lat[:, 3] == v), :2]
-            c = dest_lat[(dest_lat[:, 2] == u) & (dest_lat[:, 3] == v+1), :2]
-            d = dest_lat[(dest_lat[:, 2] == u) & (dest_lat[:, 3] == v-1), :2]
-        else:  # TODO: This assumes a 100 perovskite; any good way to generalize to other axes / structures?
-            a = dest_lat[(dest_lat[:, 2] == u+0.5) & (dest_lat[:, 3] == v+0.5), :2]
-            b = dest_lat[(dest_lat[:, 2] == u+0.5) & (dest_lat[:, 3] == v-0.5), :2]
-            c = dest_lat[(dest_lat[:, 2] == u-0.5) & (dest_lat[:, 3] == v-0.5), :2]
-            d = dest_lat[(dest_lat[:, 2] == u-0.5) & (dest_lat[:, 3] == v+0.5), :2]
+def get_uv_neighbors(row: pd.Series | pd.DataFrame,
+                     df: pd.DataFrame,
+                     uv_offsets: list[tuple[float, float]])\
+        -> list[int] | None:
+    """Apply to dataframe to add column of neighbor indices for each site
+    Args:
+        row: Current row for df.apply
+        df: Dataframe for df.apply (should be the same frame row comes from)
+        uv_offsets: A list of (u, v) cooridnate offsets for which columns should count as a neighbor. If a particular
+          (u, v) coordinate does not point to an atom column, it is skipped. Common patterns include:
+            - Sqaure rook: [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            - Sqaure bishop: [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+            - Square queen: rook.extend(bishop)
+            - Wurtzite 11-20: [(2/3, 1/2), (2/3, -1/2), (1/3, 1/2), (1/3, -1/2), (0, 1), (0, -1),
+              (-1/3, 1/2), (-1/3, -1/2), (-2/3, 1/2), (-2/3, -1/2)]
+    Returns:
+        List of neighbors, as indexed in df
+    """
+    u, v = row["u"], row["v"]
+    neighborhood = set()  # Avoid duplicates due to repeated (u, v) offsets (e.g. [(0, 1), (0, 1)])
+    for u_off, v_off in uv_offsets:
+        match = df.loc[(np.isclose(df["u"], u+u_off)) & (np.isclose(df["v"], v+v_off))]
+        if len(match) != 1:
+            # We should never get more than one match, but if we do we'll skip them since something is wrong
+            # We might get 0 matches for two reasons: either we're at an image edge, or else the (u, v) offset
+            #  doesn't point to a valid site from this one (happens when there's more than one kind of site
+            #  per projected cell)
+            continue
+        neighborhood.add(match.index[0])
 
-        distances.extend([np.linalg.norm(origin[:2] - neighbor_pos)*pixel_size
-                          for neighbor_pos in [a, b, c, d]
-                          if not len(neighbor_pos) == 0])
-    return np.asarray(distances)
+    # Sometimes we find no neighbors if the column was fit poorly; just throw it out
+    if not neighborhood:
+        neighborhood = None
+    return list(neighborhood)
 
 
-# %% Import the image
-crop: bool = True  # Set this to true to interactively crop image after loading
+##################
+#     PART 1     #
+# Import and Fit #
+##################
+# %% Image import
 path = Path(askopenfilename())
 match path.suffix:
     case ".tif":
         # noinspection PyTypeChecker
-        img = _minmax_norm(np.array(imread(path)))
+        img = minmax_norm(np.array(imread(path)))
     case ".emd":
-        infile = hs.load(path)
+        import hyperspy.api
+        from importlib.metadata import version
+        if version("hyperspy") > "2.0rc0":
+            warn("File IO was deprecated in HyperSpy versions 2.0rc0 and beyond; .emd file importing will not work.")
+        infile = hyperspy.api.load(path)
         # The only kind of data it makes sense to load from an .emd is from the HAADF detector
         # iDPC / dDPC images are not computed and saved in the .emd file
-        img = _minmax_norm(next(signal for signal in infile
-                                if signal.metadata.General.title == "HAADF"))
+        img = minmax_norm(next(signal for signal in infile
+                               if signal.metadata.General.title == "HAADF"))
     case "":
         raise RuntimeError("No type extension in file name; either file has no extension or no file was selected.")
     case _:
         raise RuntimeError(f"Unsupported filetype: {path.suffix}")
 
-if crop:
-    img = qc.gui_crop(img)
-
-# %% Import the structure file
+# %% Import the .cif structure file
 load_method: Literal[
     "fixed",  # Load via a fixed file path, given below, without a file picker window
     "interactive",  # Interactively select the file using a (native) file picker window
     "mp_api"  # Load a cif from Materials Project; requires an API key!
     ] = "fixed"
-
 fixed_path = Path("E:/Users/Charles/AlN.cif")  # Local path to .cif file
-mp_id = "mp-5229"  # Materials Project ID for desired structure, including the leading "mp-"
+mp_id = "mp-661"  # Materials Project ID for desired structure, including the leading "mp-"
 
 origin_shift: tuple[float, float, float] = (0, 0, 0)  # Set to shift the unit cell origin of the structure on load
 # To relabel atomic sites in the unit cell on load, set as a dict from default label to new label
@@ -102,14 +114,20 @@ match load_method:
         interactive_path = Path(askopenfilename())
         uc = so.UnitCell(str(interactive_path), origin_shift=origin_shift)
     case "mp_api":
-        raise NotImplementedError("Loading from the MP API is not yet implemented in this script!")
-        # TODO: UnitCell wants a string pointing to a local file; might need to copy the cif to a temp file
-        # mp_api_key = MP_API_KEY  # Personal API key (tied to MP account)
-        #
-        # with MPRester(mp_api_key) as mp:
-        #     mp_struct = mp.get_structure_by_material_id(mp_id)
-        #     print(mp_struct)
-        #     struct = AseAtomsAdaptor().get_atoms(mp_struct)
+        print(f"Searching for {mp_id}...")
+        import tempfile
+        from mp_api.client import MPRester
+        from pymatgen.io.cif import CifWriter
+        from data_analysis_scripts.cse_secrets import MP_API_KEY
+        mp_api_key = MP_API_KEY  # Personal API key (tied to MP account)
+        with MPRester(mp_api_key) as mp:
+            mp_struct = mp.get_structure_by_material_id(mp_id)
+            # We must write to a temporary .cif file for SingleOrigin to be able to read the structure
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_file_path = Path(tmp_dir, "tmp.cif")
+                writer = CifWriter(mp_struct, symprec=True, refine_struct=True)
+                writer.write_file(tmp_file_path)
+                uc = so.UnitCell(str(tmp_file_path), origin_shift=origin_shift)
     case _:
         raise NotImplementedError(f"Unrecognized file load method: {load_method}")
 
@@ -122,27 +140,49 @@ plot_projected_cell: bool = True  # Set True to pop up a visualization of the pr
 uc.project_zone_axis((1, 1, 0),  # Zone axis direction
                      (1, -1, 0),  # Apparent horizontal axis in projection
                      (0, 0, 1),  # Most vertical axis in projection
-                     ignore_elements=["N"]  # List of elements to ignore (e.g. light elements in a HAADF image)
-                     )
+                     ignore_elements=["N"],  # List of elements to ignore (e.g. light elements in a HAADF image)
+                     reduce_proj_cell=True)
 uc.combine_prox_cols(toler=1e-2)  # 1e-2 works well as a tolerance, but adjust as needed
 
 if plot_projected_cell:
     uc.plot_unit_cell()
 
 # %% Create the SingleOrigin HRImage object
-hr_img = so.HRImage(img)
-# noinspection PyTypeChecker
-lattice = hr_img.add_lattice("AlN",  # Human-readable name for the lattice in the image
-                             uc,
-                             origin_atom_column=None)  # Index in uc of column to use as fitting origin, None == default
+latt_dict_name: str = "AlN"  # Human-readable name for the lattice in the image
+origin_ac: int | None = None  # Index in uc of column to use as fitting origin, default is None
+crop: None | Literal[  # Set to None to fit entire field of view
+    "quick",  # Quick interactive cropping (square only)
+    "flexible",  # Select an arbitrary contiguous polygonal region
+    ] = "flexible"
+
+match crop:
+    case None:
+        hr_img = so.HRImage(img)
+        # noinspection PyTypeChecker
+        lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
+    case "quick":
+        import quickcrop
+        img = quickcrop.gui_crop(img)
+        hr_img = so.HRImage(img)
+        # noinspection PyTypeChecker
+        lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
+    case "flexible":
+        hr_img = so.HRImage(img)
+        # noinspection PyTypeChecker
+        lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
+        lattice.get_roi_mask_polygon()
+    case _:
+        raise NotImplementedError("Unrecognized cropping type")
 
 # %% Reciprocal-space rough fit of lattice
+
 # Both of these methods spawn windows that must be interacted with before they time out!
 # Rerun the cell if you accidentally let them time out
 # If some FFT peaks are weak or absent (such as forbidden reflections), specify the order of the first peak that
 # is clearly visible
 lattice.fft_get_basis_vect(a1_order=1,  # Order of peak corresponding to planes in the most horizontal direction
-                           a2_order=2)  # Order of peak corresponding to planes in the most vertical direction
+                           a2_order=2,  # Order of peak corresponding to planes in the most vertical direction
+                           thresh_factor=0.5)  # Decrease to detect more peaks
 lattice.define_reference_lattice()
 
 # %% Fit the atom columns
@@ -155,7 +195,6 @@ lattice.fit_atom_columns(buffer=10,  # Pixel buffer around image edges to avoid 
                          peak_grouping_filter=None,  # Apply a filter for simultaneous column fitting
                          peak_sharpening_filter="auto")  # Apply a filter to improve column position fitting
 
-
 # Must have only one column per projected unit cell.  If no sublattice meets this criteria, specify a specific column
 # in the projected cell.
 lattice.refine_reference_lattice(filter_by="elem",  # Which dataframe column to select on
@@ -163,11 +202,12 @@ lattice.refine_reference_lattice(filter_by="elem",  # Which dataframe column to 
 
 # %% Assess fit quality
 # All of these steps are optional but can help with assessing a failed fit; uncomment desired lines
+# It's a good idea to at least assess_positions to make sure fitting went as expected
 # See function documentation for param descriptions
 assess_masks: bool = False
 assess_positions: bool = True
 assess_residuals: bool = False
-assess_displacement: bool = True
+assess_displacement: bool = False
 
 if assess_masks:
     lattice.show_masks()
@@ -178,13 +218,21 @@ if assess_residuals:
 if assess_displacement:
     hr_img.plot_disp_vects(sites_to_plot=["Al/Gd"], arrow_scale_factor=2)
 
+###################
+#     PART 2      #
+# vPCF Generation #
+###################
 # %% Setup vPCFs
-hr_img = hr_img.rotate_image_and_data("AlN", "a1", "right")
-lattice = hr_img.latt_dict["AlN_rot"]  # TODO: SO GitHub issue - I don't think rotation should overwrite old lattice
+hr_img_rot = hr_img.rotate_image_and_data("AlN", "a2", "up")
+lattice = hr_img_rot.latt_dict["AlN_rot"]  # FIXME: GitHub issue
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
 column_labels: set = {"Al/Gd"}  # Which columns to generate vPCFs for (usually element names)
 xlimits, ylimits = (-1.1, 1.1), (-1.1, 1.1)  # Limits for vPCF plotting (unit cells)
+# These colors come from the IBM colorblind palette and should have okay contrast even in grayscale
+basic_colors = {"green":   "#117733ff",
+                "magenta": "#dc267fff",
+                "orange":  "#fe6100ff"}
 
 lattice.get_vpcfs(xlim=xlimits, ylim=ylimits, d=pxsize,
                   get_only_partial_vpcfs=(not pair_pair),
@@ -199,12 +247,8 @@ combos = [tuple(string.split("-")) for string in combos]
 plot_ref: bool = True  # If true, plot reference lattice points
 # Adjust min and max values to get the desired level of color saturation on the vPCFs
 minval: int = 0
-maxval: int = 80
+maxval: int = 70
 
-# These colors come from the IBM colorblind palette and should have okay contrast even in grayscale
-basic_colors = {"green":   "#117733ff",
-                "magenta": "#dc267fff",
-                "orange":  "#fe6100ff"}
 # Three colors should be sufficient for two elements with self-vPCFs enabled, or three without; more vPCFs on one
 #  plot is probably a bad idea but if you want to do that you'll need more colors
 if len(combos) > len(basic_colors):
@@ -254,20 +298,67 @@ else:
     vpcf_fig.savefig(savedir, dpi=600, bbox_inches="tight")
 
 # %% Plot distance map
+n_peaks = 1  # number of peaks to fit
 lattice.get_vpcf_peak_params()
 nn_dists = {}
 for combo in combos:
-    if combo[0] == combo[1]:
-        n_peaks = 1
-    else:
-        n_peaks = 4
     nn_dists[combo] = lattice.plot_distances_from_vpcf_peak(f"{combo[0]}-{combo[1]}",
                                                             number_of_peaks_to_pick=n_peaks,
                                                             deviation_or_absolute="deviation",
                                                             return_nn_list=True)
 
-# %% Generate nearest-neighbor distance histograms (per sublattice)
-# TODO: Instead of finding the neighbors again, use the NN-distances list from the previous cell
+#################
+#    PART 3     #
+# Global Survey #
+#################
+# %% Generate a histogram of column intensities
+try:
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name].at_cols)
+except KeyError:
+    # Lattice may have been rotated
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name+"_rot"].at_cols)
+frame.drop(["site_frac", "x", "y", "weight"], axis=1, inplace=True)  # We don't need these cols
+frame.reset_index(drop=True, inplace=True)
+ints = list(frame["total_col_int"])
+ints = minmax_norm(np.array(ints))
+
+dist_params = describe(ints)
+outlier_thresh = (max(0, dist_params.mean - 4*np.sqrt(dist_params.variance)),
+                  min(1, dist_params.mean + 4*np.sqrt(dist_params.variance)))
+ints = [i for i in ints if outlier_thresh[0] < i < outlier_thresh[1]]  # Filter outliers
+ints = minmax_norm(np.array(ints))  # Re-norm w/o outliers
+dist_params = describe(ints)  # Re-calculate stats
+
+int_kernel = gaussian_kde(ints)
+density_estimate = int_kernel.evaluate(np.linspace(0, 1, 1000))
+
+fig, hax = plt.subplots()
+kdeax = hax.twinx()
+hax.hist(ints, bins="auto", histtype="step", color="#fe6100")
+hax.set_ylabel("Counts")
+hax.set_xlabel("Normalized Intensity")
+kdeax.plot(np.linspace(0, 1, 1000), density_estimate, "-", c="#785ef0")
+kdeax.set_yticks([])
+kdeax.set_ylim(bottom=0)
+hax.set_xlim(0, 1)
+hax.spines[["right", "top"]].set_visible(False)
+kdeax.spines[["right", "top"]].set_visible(False)
+
+# noinspection PyUnresolvedReferences
+statstr = (f"Mean: {dist_params.mean:.3g}\n"
+           f"St. Deviation: {np.sqrt(dist_params.variance):.3g}\n"
+           f"Skewness: {dist_params.skewness:.3g}\n"
+           f"Excess Kurtosis: {dist_params.kurtosis:.3g}\n"
+           f"Data is {'not' if shapiro(ints)[1]<0.05 else ''} normally distributed")
+hax.text(1, 1, statstr, transform=hax.transAxes, verticalalignment="top", horizontalalignment="right",
+         color="white", bbox={"boxstyle": "round", "facecolor": "black"})
+plt.show()
+
+###############
+#   PART 4    #
+# Local Study #
+###############
+# %% Generate nearest-neighbor distance histograms
 bin_width: float = 0.01  # Angstroms
 errorbar_offset: float = 50  # How far above the tallest histogram to place the error bars
 print_stats: bool = True  # Print distribution statistics to stdout
@@ -275,11 +366,30 @@ print_stats: bool = True  # Print distribution statistics to stdout
 if len(combos) > len(basic_colors):  # This is checked when plotting vPCFs, but in case that step is skipped check again
     raise RuntimeError(f"Trying to plot {len(combos)} histograms with {len(basic_colors)} colors: plot fewer vPCFs or"
                        " add additional colors.")
+# Regenerate frame, in case we need it or it's been mucked with
+try:
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name].at_cols)
+except KeyError:
+    # Lattice may have been rotated
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name+"_rot"].at_cols)
+frame.drop(["site_frac", "x", "y", "weight"], axis=1, inplace=True)  # We don't need these cols
+frame.reset_index(drop=True, inplace=True)
+
+uv_offsets = [(2/3, 1/2), (2/3, -1/2), (1/3, 1/2), (1/3, -1/2), (0, 1),
+              (0, -1), (-1/3, 1/2), (-1/3, -1/2), (-2/3, 1/2), (-2/3, -1/2)]
+frame["neighborhood"] = frame.apply(lambda row: get_uv_neighbors(row, frame, uv_offsets), axis=1)
+
+
+#%%
+
 coord_dict = {lab: lattice.at_cols.loc[lattice.at_cols["elem"] == lab, ["x_fit", "y_fit", "u", "v"]].to_numpy()
               for lab in column_labels}
 hist_dists = {combo: nn_distances(coord_dict[combo[0]],
                                   coord_dict[combo[1]],
                                   lattice.pixel_size_est) for combo in combos}
+
+
+
 hist_stats = {combo: describe(dists) for combo, dists in hist_dists.items()}
 if print_stats:
     for combo, stats in hist_stats.items():
@@ -353,5 +463,3 @@ if savedir == Path("."):
 else:
     hist_fig.set_size_inches(10, 6)
     hist_fig.savefig(savedir, dpi=600, bbox_inches="tight")
-
-#%%
