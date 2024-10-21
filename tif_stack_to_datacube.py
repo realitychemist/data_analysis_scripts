@@ -14,7 +14,7 @@ from tkinter.filedialog import askopenfilename, asksaveasfilename
 
 crop_and_bin = True  # Set to true to crop-and-bin data before saving, or False to save the original data
 crop_to: tuple[int, int] = (600, 600)  # Size to crop individual diffraction patterns to (before binning)
-bin_factor: int = 2  # Number of pixels to bin in each image direction
+bin_factor: int = 3  # Number of pixels to bin in each image direction
 
 # %% Open JSON meta-file
 meta_fname = askopenfilename(filetypes=[("JSON Files", ".json")])
