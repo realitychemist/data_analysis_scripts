@@ -1,8 +1,21 @@
-import abtem
-from collections.abc import Collection, Sequence
 from numpy import cos, sin
-from packaging import version
 from warnings import warn
+from packaging import version
+from collections.abc import Collection, Sequence
+
+# abTEM imports ase, and one of ase's modules tries to import scipy.cumtrapz, which was removed in v1.14.0
+# We never use any ase code that calls cumtrapz though (it's all nudged elastic band related)
+# So: this block of code imports abTEM while temporarily suppressing the ImportError
+import os
+import sys
+original_stderr = sys.stderr.fileno()
+devnull = os.open(os.devnull, os.O_WRONLY)
+try:
+    os.dup2(devnull, original_stderr)
+    import abtem
+finally:
+    os.dup2(original_stderr, original_stderr)
+    os.close(devnull)
 
 
 def simulate_stem(potential: abtem.Potential,
@@ -82,7 +95,10 @@ def simulate_stem(potential: abtem.Potential,
                                  detectors=detectors,
                                  **kwargs)
     if eager:
-        measurement.compute()
+        if type(measurement) is list:
+            [m.compute() for m in measurement]
+        else:
+            measurement.compute()
     return measurement
 
 
@@ -98,7 +114,7 @@ def preview_stem_result(result: abtem.Images | abtem.measurements.BaseMeasuremen
         result: Images or measurements resulting from a STEM simulation.
         titles: Optional, a collection containing a title to print on each plot. If None (default), don't add titles.
     """
-    if not isinstance(result, abtem.array.ComputableList):
+    if not (isinstance(result, abtem.array.ComputableList) or type(result) is list):
         result = [result]  # Wrap into single element list for the following loop
 
     if titles is not None:
@@ -130,9 +146,9 @@ def _test_potential() -> abtem.Potential:
     """Returns an example potential (and pops up a view of it) in order to test that simulations are working."""
     from ase.build import bcc100
     from ase.visualize import view
-    structure = bcc100("Fe", size=(6, 6, 20), orthogonal=True, periodic=True)
-    structure.symbols[700] = "Au"
-    view(structure)
+    structure = bcc100("Fe", size=(3, 3, 10), orthogonal=True, periodic=True)
+    structure.symbols[13] = "Au"
+    view(structure)  # TODO: Causing a broken pipe error for some reason?
     return abtem.Potential(structure,
                            sampling=0.04,
                            projection="infinite",

@@ -1,5 +1,6 @@
 import copy
 from pathlib import Path
+from tkinter import Tk
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 from typing import Literal
 from tifffile import imread
@@ -67,12 +68,27 @@ def get_uv_neighbors(row: pd.Series | pd.DataFrame,
     return list(neighborhood)
 
 
+def tk_open(**kwargs):
+    """Tk helper to ensure window appears on top."""
+    root = Tk()
+    root.iconify()
+    root.attributes('-topmost', True)
+    root.update()
+    loc = None  # Default return if open fails; will likely cause an error when passed along
+    try:
+        loc = askopenfilename(parent=root, **kwargs)
+    finally:
+        root.attributes('-topmost', False)
+        root.destroy()
+    return loc
+
+
 ##################
 #     PART 1     #
 # Import and Fit #
 ##################
 # %% Image import
-path = Path(askopenfilename())
+path = Path(tk_open())
 match path.suffix:
     case ".tif":
         # noinspection PyTypeChecker
@@ -111,7 +127,7 @@ match load_method:
     case "fixed":
         uc = so.UnitCell(str(fixed_path), origin_shift=origin_shift)
     case "interactive":
-        interactive_path = Path(askopenfilename())
+        interactive_path = Path(tk_open())
         uc = so.UnitCell(str(interactive_path), origin_shift=origin_shift)
     case "mp_api":
         print(f"Searching for {mp_id}...")
@@ -150,6 +166,7 @@ if plot_projected_cell:
 # %% Create the SingleOrigin HRImage object
 latt_dict_name: str = "AlN"  # Human-readable name for the lattice in the image
 origin_ac: int | None = None  # Index in uc of column to use as fitting origin, default is None
+px_size: float | None = 14.21  # Image pixel size (pm); if None, will be estimated from the fitted lattice
 crop: None | Literal[  # Set to None to fit entire field of view
     "quick",  # Quick interactive cropping (square only)
     "flexible",  # Select an arbitrary contiguous polygonal region
@@ -157,17 +174,17 @@ crop: None | Literal[  # Set to None to fit entire field of view
 
 match crop:
     case None:
-        hr_img = so.HRImage(img)
+        hr_img = so.HRImage(img, pixel_size_cal=px_size)
         # noinspection PyTypeChecker
         lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
     case "quick":
         import quickcrop
         img = quickcrop.gui_crop(img)
-        hr_img = so.HRImage(img)
+        hr_img = so.HRImage(img, pixel_size_cal=px_size)
         # noinspection PyTypeChecker
         lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
     case "flexible":
-        hr_img = so.HRImage(img)
+        hr_img = so.HRImage(img, pixel_size_cal=px_size)
         # noinspection PyTypeChecker
         lattice = hr_img.add_lattice(latt_dict_name, uc, origin_atom_column=None)
         lattice.get_roi_mask_polygon()
@@ -223,7 +240,7 @@ if assess_displacement:
 # vPCF Generation #
 ###################
 # %% Setup vPCFs
-hr_img_rot = hr_img.rotate_image_and_data("AlN", "a2", "up")
+hr_img_rot = hr_img.rotate_image_and_data("AlN", "a1", "up")
 lattice = hr_img_rot.latt_dict["AlN_rot"]  # FIXME: GitHub issue
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
@@ -247,7 +264,7 @@ combos = [tuple(string.split("-")) for string in combos]
 plot_ref: bool = True  # If true, plot reference lattice points
 # Adjust min and max values to get the desired level of color saturation on the vPCFs
 minval: int = 0
-maxval: int = 70
+maxval: int = 100
 
 # Three colors should be sufficient for two elements with self-vPCFs enabled, or three without; more vPCFs on one
 #  plot is probably a bad idea but if you want to do that you'll need more colors
@@ -275,8 +292,8 @@ for vpcf, cmap in zip([value for key, value in lattice.vpcfs.items() if key != "
 if plot_ref:
     # noinspection PyUnboundLocalVariable
     for ref_vpcf in ref_vpcfs.values():
-        vpcf_ax.imshow(ref_vpcf[0], cmap=LinearSegmentedColormap.from_list("transparent-blue",
-                                                                           ["#00000000", "#22aaffff"], 2),
+        vpcf_ax.imshow(ref_vpcf[0], cmap=LinearSegmentedColormap.from_list("transparent-orange",
+                                                                           ["#00000000", "#fe6100ff"], 2),
                        vmax=1, vmin=0, interpolation="gaussian")
 
 vpcf_ax.plot(origin_x, origin_y, "wx")  # Plot the origin as an "x"
@@ -284,7 +301,7 @@ vpcf_ax.set_title("Vector Partial Pair Correlation Functions for "
                   f"{' & '.join(filter(None, [', '.join(list(column_labels)[:-1]), list(column_labels)[-1]]))}")
 legend_elements = [Patch(facecolor=c, edgecolor=c, label=f"{combo[0]}–{combo[1]}")
                    for c, combo in zip(basic_colors, combos)]
-legend_elements.append(Patch(facecolor="#22aaffff", edgecolor="#22aaffff", label="Reference"))
+legend_elements.append(Patch(facecolor="#fe6100", edgecolor="#fe6100", label="Reference"))
 vpcf_ax.legend(handles=legend_elements, loc="best")
 vpcf_ax.get_xaxis().set_visible(False)
 vpcf_ax.get_yaxis().set_visible(False)
@@ -296,6 +313,9 @@ if savedir == Path("."):
 else:
     vpcf_fig.set_size_inches(10, 10)
     vpcf_fig.savefig(savedir, dpi=600, bbox_inches="tight")
+
+# %% Plot radial PCF
+
 
 # %% Plot distance map
 n_peaks = 1  # number of peaks to fit
