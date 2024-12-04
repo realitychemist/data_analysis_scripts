@@ -5,17 +5,27 @@ from collections.abc import Collection, Sequence
 
 # abTEM imports ase, and one of ase's modules tries to import scipy.cumtrapz, which was removed in v1.14.0
 # We never use any ase code that calls cumtrapz though (it's all nudged elastic band related)
-# So: this block of code imports abTEM while temporarily suppressing the ImportError
+# So: this block of code imports abTEM while temporarily suppressing the ImportError. Now compatible with Jupyter!
 import os
 import sys
-original_stderr = sys.stderr.fileno()
-devnull = os.open(os.devnull, os.O_WRONLY)
 try:
+    original_stderr = sys.stderr.fileno()
+    devnull = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull, original_stderr)
-    import abtem
-finally:
-    os.dup2(original_stderr, original_stderr)
-    os.close(devnull)
+    try:
+        import abtem
+    finally:
+        os.dup2(original_stderr, original_stderr)
+        os.close(devnull)
+except (AttributeError, OSError):
+    # Fallback when stderr.fileno is not supported (e.g. Jupyter)
+    original_stderr = sys.stderr
+    sys.stderr = open(os.devnull, "w")
+    try:
+        import abtem
+    finally:
+        sys.stderr.close()
+        sys.stderr = original_stderr
 
 
 def simulate_stem(potential: abtem.Potential,
@@ -61,8 +71,8 @@ def simulate_stem(potential: abtem.Potential,
     if not version.parse(abtem.__version__) >= version.parse("1.0.0"):
         raise RuntimeError("This method will only work with abTEM versions >= 1.0.0 due to breaking changes in abTEM. "
                            "Please update you abTEM version.")
-
-    print("Simulating...")
+    if eager:
+        print("Simulating...")
     if scan is None:
         scan = abtem.scan.GridScan(potential=potential)
     tilt = (tilt_mag * sin(tilt_angle), tilt_mag * cos(tilt_angle))
@@ -148,7 +158,7 @@ def _test_potential() -> abtem.Potential:
     from ase.visualize import view
     structure = bcc100("Fe", size=(3, 3, 10), orthogonal=True, periodic=True)
     structure.symbols[13] = "Au"
-    view(structure)  # TODO: Causing a broken pipe error for some reason?
+    view(structure)  # This is not doing anything for some reason
     return abtem.Potential(structure,
                            sampling=0.04,
                            projection="infinite",

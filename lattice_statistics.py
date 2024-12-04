@@ -241,7 +241,7 @@ if assess_displacement:
 ###################
 # %% Setup vPCFs
 hr_img_rot = hr_img.rotate_image_and_data("AlN", "a1", "up")
-lattice = hr_img_rot.latt_dict["AlN_rot"]  # FIXME: GitHub issue
+lattice = hr_img_rot.latt_dict["AlN_rot"]
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
 column_labels: set = {"Al/Gd"}  # Which columns to generate vPCFs for (usually element names)
