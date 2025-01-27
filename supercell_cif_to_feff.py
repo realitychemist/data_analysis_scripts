@@ -46,7 +46,7 @@ matplotlib.use('TkAgg')
 fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 out_points = allcoords[min_distances < 8]
-in_points = allcoords[min_distances >= 8]
+in_points = allcoords[min_distances > 8]
 ax.scatter(out_points[:, 0], out_points[:, 1], out_points[:, 2],
            color='blue', s=10, label='Exterior Points')
 ax.scatter(in_points[:, 0], in_points[:, 1], in_points[:, 2],
@@ -67,7 +67,7 @@ first = True
 with open(tk_popover(save=True), "wt") as outfile:
     for dist, site in zip(min_distances, struct.sites):
         if site.species_string == "N":
-            if dist >= 8:
+            if dist > 8:
                 interior_n = True
             else:
                 interior_n = False

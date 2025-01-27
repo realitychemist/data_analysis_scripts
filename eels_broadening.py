@@ -39,8 +39,8 @@ E, I = indata.Energy, indata.total
 fwhm = 1.4
 disp = 0.1
 
-window = np.arange(-5, 5, disp)
-lor = lorentzian(window, 0, fwhm/2)
+kern = np.arange(-5, 5, disp)
+lor = lorentzian(kern, 0, fwhm/2)
 broad = scipy.signal.convolve(I, lor, mode="same") * disp
 
 plt.plot(E.values, I.values, color="orange", lw=1, linestyle="--", label="Original")
