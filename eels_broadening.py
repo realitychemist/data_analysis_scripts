@@ -1,8 +1,10 @@
 from tkinter import Tk
+import numpy as np
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 import scipy
 import pandas
 import matplotlib.pyplot as plt
+
 
 def tk_popover(save: bool = False, **kwargs):
     """Tk helper to ensure window appears on top."""
@@ -22,6 +24,11 @@ def tk_popover(save: bool = False, **kwargs):
         root.destroy()
     return loc
 
+
+def lorentzian(x, x0, gamma):
+    return gamma / (np.pi * ((x-x0)**2 + gamma**2))
+
+
 # %% Read in EELS data from .xlsx
 indata = pandas.read_excel(tk_popover())
 
@@ -29,9 +36,12 @@ indata = pandas.read_excel(tk_popover())
 E, I = indata.Energy, indata.total
 
 # %% Broaden & plot
-"""Sigma is defined by (FWHM/(2sqrt(2ln2))/dispersion. For a FWHM of 1.45 eV and dispersion of 0.1 eV/channel,
-this corresponds to 0.616/0.1"""
-broad = scipy.ndimage.gaussian_filter1d(I, sigma=0.616/0.1, mode="nearest")
+fwhm = 1.4
+disp = 0.1
+
+window = np.arange(-5, 5, disp)
+lor = lorentzian(window, 0, fwhm/2)
+broad = scipy.signal.convolve(I, lor, mode="same") * disp
 
 plt.plot(E.values, I.values, color="orange", lw=1, linestyle="--", label="Original")
 plt.plot(E.values, broad, color="green", lw=1, linestyle="-", label="Broadened")
@@ -47,5 +57,5 @@ plt.show()
 #%% Save
 df_broad = pandas.DataFrame({"E": E, "I": broad})
 with pandas.ExcelWriter(tk_popover(), mode="a") as writer:
-    df_broad.to_excel(writer, index=False, sheet_name="broadened")
+    df_broad.to_excel(writer, index=False, sheet_name="broadened_14")
 #%%
