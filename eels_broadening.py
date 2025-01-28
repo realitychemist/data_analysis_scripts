@@ -30,21 +30,32 @@ def lorentzian(x, x0, gamma):
 
 
 # %% Read in EELS data from .xlsx
-indata = pandas.read_excel(tk_popover())
+indata = pandas.read_excel(tk_popover(), sheet_name="interp")
 
 # %% Select the correct columns
-E, I = indata.Energy, indata.total
+E, I = indata["E_Interp"], indata["I_Avg"]
 
 # %% Broaden & plot
-fwhm = 1.4
+fwhm = 1.2
 disp = 0.1
 
-kern = np.arange(-5, 5, disp)
-lor = lorentzian(kern, 0, fwhm/2)
-broad = scipy.signal.convolve(I, lor, mode="same") * disp
+# We must ensure equi-spacing in E for convolution to work correctly
+E_grid = np.linspace(min(E.values), max(E.values), len(E))
+interp_function = scipy.interpolate.interp1d(E, I, kind="linear")
+I_interp = interp_function(E_grid)
+
+if len(E_grid)%2 == 0:
+    center = E_grid[len(E_grid)//2-1]
+else:
+    center = E_grid[len(E_grid)//2]
+
+lor = lorentzian(E_grid, center, fwhm/2)
+lor /= np.sum(lor)
+
+broad = scipy.signal.convolve(I_interp, lor, mode="same")
 
 plt.plot(E.values, I.values, color="orange", lw=1, linestyle="--", label="Original")
-plt.plot(E.values, broad, color="green", lw=1, linestyle="-", label="Broadened")
+plt.plot(E_grid, broad, color="green", lw=1, linestyle="-", label="Broadened")
 plt.xlim((401, 436))
 plt.gca().set_yticks([])
 plt.gca().spines['top'].set_visible(False)
@@ -55,7 +66,8 @@ plt.legend()
 plt.show()
 
 #%% Save
-df_broad = pandas.DataFrame({"E": E, "I": broad})
+df_broad = pandas.DataFrame({"E": E_grid, "I": broad})
 with pandas.ExcelWriter(tk_popover(), mode="a") as writer:
-    df_broad.to_excel(writer, index=False, sheet_name="broadened_14")
+    df_broad.to_excel(writer, index=False, sheet_name="broadened_12")
+print("Saved!")
 #%%
