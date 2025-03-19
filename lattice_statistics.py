@@ -3,6 +3,7 @@ from pathlib import Path
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 from typing import Literal
+
 from tifffile import imread
 from warnings import warn
 
@@ -10,11 +11,16 @@ from itertools import combinations
 import numpy as np
 import SingleOrigin as so
 from scipy.stats import describe, gaussian_kde, shapiro
+from scipy.spatial import Voronoi
 import pandas as pd
+from libpysal import weights
+from esda import Moran, Moran_Local
 
 import matplotlib
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.cm import ScalarMappable
+from matplotlib.gridspec import GridSpec
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.patches import Patch
 matplotlib.use("TkAgg")
 plt.style.use('dark_background')
@@ -166,7 +172,7 @@ if plot_projected_cell:
 # %% Create the SingleOrigin HRImage object
 latt_dict_name: str = "AlN"  # Human-readable name for the lattice in the image
 origin_ac: int | None = None  # Index in uc of column to use as fitting origin, default is None
-px_size: float | None = 14.21  # Image pixel size (pm); if None, will be estimated from the fitted lattice
+px_size: float | None = 8.7  # Image pixel size (pm); if None, will be estimated from the fitted lattice
 crop: None | Literal[  # Set to None to fit entire field of view
     "quick",  # Quick interactive cropping (square only)
     "flexible",  # Select an arbitrary contiguous polygonal region
@@ -241,7 +247,7 @@ if assess_displacement:
 ###################
 # %% Setup vPCFs
 hr_img_rot = hr_img.rotate_image_and_data("AlN", "a1", "up")
-lattice = hr_img_rot.latt_dict["AlN_rot"]
+lattice = hr_img_rot[0].latt_dict["AlN_rot"]
 pair_pair: bool = True  # If true, will get vPCFs within _and_ between sublattices, otherwise only within
 pxsize: float = 0.01  # Angstrom
 column_labels: set = {"Al/Gd"}  # Which columns to generate vPCFs for (usually element names)
@@ -314,8 +320,6 @@ else:
     vpcf_fig.set_size_inches(10, 10)
     vpcf_fig.savefig(savedir, dpi=600, bbox_inches="tight")
 
-# %% Plot radial PCF
-
 
 # %% Plot distance map
 n_peaks = 1  # number of peaks to fit
@@ -378,7 +382,119 @@ plt.show()
 #   PART 4    #
 # Local Study #
 ###############
-# %% Generate nearest-neighbor distance histograms
+#%% Regenerate frame, in case we need it or it's been mucked with, setup for spatial stats
+n_sigmas: float = 0.1  # Number of standard deviations away from the mean a point can be before outlier rejection
+
+try:
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name].at_cols)
+except KeyError:
+    # Lattice may have been rotated
+    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name+"_rot"].at_cols)
+frame.drop(["site_frac", "x", "y", "weight", "elem"], axis=1, inplace=True)  # We don't need these cols
+frame.reset_index(drop=True, inplace=True)
+
+uv_offsets = [(2/3, 1/2), (2/3, -1/2), (1/3, 1/2), (1/3, -1/2), (0, 1),
+              (0, -1), (-1/3, 1/2), (-1/3, -1/2), (-2/3, 1/2), (-2/3, -1/2)]
+frame["neighborhood"] = frame.apply(lambda row: get_uv_neighbors(row, frame, uv_offsets), axis=1)
+
+# Filter outlier and create libpysal weights matrix object
+mu, sig = frame["total_col_int"].mean(), frame["total_col_int"].std()
+non_outliers = frame[(frame["total_col_int"] >= mu-n_sigmas*sig) & (frame["total_col_int"] <= mu+n_sigmas*sig)].index
+filtered_frame = frame.loc[non_outliers].copy()
+filtered_frame["neighborhood"] = filtered_frame["neighborhood"].apply(lambda neighbors: [n for n in neighbors
+                                                                                         if n in non_outliers])
+adjmap = {}
+for i, row in filtered_frame.iterrows():
+    adjmap[str(i)] = tuple(map(str, row.neighborhood))
+w = weights.W(adjmap, silence_warnings=True)
+w.transform = "r"  # Row-standard form
+
+# %% Get Moran's I stats (global, local)
+alpha: float = 0.05  # Statistical power for false discovery rate control
+
+ints = [x for x in filtered_frame["total_col_int"]]
+
+global_stats = Moran(ints, w, permutations=10000)
+print(f"Global Moran's I:     {round(global_stats.I, 5)}\n"
+      f"Expected I for CSR:  {round(global_stats.EI_sim, 5)}\n"
+      f"p-value (10k perms.): {round(global_stats.p_sim, 5)}")
+if global_stats.p_sim < 0.05:
+    print("Observed distribution not consistent with CSR")
+else:
+    print("Observed distribution consistent with CSR")
+
+local_stats = Moran_Local(ints, w, permutations=10000)
+# Add local stats back to frame
+filtered_frame["moran_I"] = local_stats.Is
+filtered_frame["moran_quadrant"] = local_stats.q
+filtered_frame["moran_p"] = local_stats.p_sim
+
+# FDR Control
+ps = {i: p for i, p in enumerate(local_stats.p_sim)}
+ps = {k: v for k, v in sorted(ps.items(), key=lambda item: item[1])}
+largest = 0
+for i, p in enumerate(ps.values()):  # Find largest i s.t. p_i <= i/len(ps)*alpha
+    if p <= i/len(ps)*alpha:
+        largest = i
+fdr_keep = {}
+for i, k in enumerate(ps.keys()):  # Mark locations which pass the FDR criteria
+    if i <= largest:
+        fdr_keep[k] = 1
+    else:
+        fdr_keep[k] = 0
+filtered_frame["fdr_keep"] = list(fdr_keep.values())  # Update frame
+
+# %% Plot local Moran data
+# noinspection PyTypeChecker
+vor = Voronoi([(x, y) for x, y in zip(filtered_frame["x_fit"], filtered_frame["y_fit"])])
+members = {i for i, (keep, quad) in enumerate(zip(filtered_frame["fdr_keep"], filtered_frame["moran_quadrant"]))
+           if keep == 1 and quad in [1, 3]}
+
+members_tmp = copy.copy(members)
+for m in members_tmp:
+    members.update(filtered_frame.iloc[m]["neighborhood"])  # Expand from core members to include their neighbors
+del members_tmp
+
+norm = Normalize(vmin=min(ints), vmax=max(ints), clip=True)
+mapper = ScalarMappable(norm=norm, cmap="inferno")
+
+fig = plt.figure(constrained_layout=True)
+gs = GridSpec(2, 4, width_ratios=[0.02, 0.05, 1, 1], height_ratios=[0.02, 1], figure=fig)
+axs = [fig.add_subplot(gs[1, 1]),
+       fig.add_subplot(gs[1, 2]),
+       fig.add_subplot(gs[1, 3])]
+for ax in [axs[1], axs[-1]]:  # Formatting applied to both axes
+    ax.imshow(img, cmap="bone")
+    ax.axis("off")
+    ax.set_xlim(left=0, right=img.shape[0])
+    ax.set_ylim(bottom=img.shape[1], top=0)
+axs[1].set_title("Column Intensity")
+axs[-1].set_title("Cluster Members")
+cbar = fig.colorbar(mapper, cax=axs[0])
+cbar.ax.yaxis.set_ticks_position("left")
+cbar.ax.yaxis.set_label_position("left")
+
+for r in range(len(vor.point_region)):
+    region = vor.regions[vor.point_region[r]]
+    if -1 not in region:
+        polygon = [vor.vertices[i] for i in region]
+        axs[1].fill(*zip(*polygon), color=mapper.to_rgba(filtered_frame.iloc[r]["total_col_int"]), alpha=0.5)
+        if r in members:
+            if filtered_frame.iloc[r]["moran_quadrant"] == 1:  # HH cluster core
+                c = "goldenrod"
+                a = 0.5
+            elif filtered_frame.iloc[r]["moran_quadrant"] == 3:  # LL cluster core
+                c = "maroon"
+                a = 0.5
+            else:  # Non-core cluster member
+                c = "white"
+                a = 0.0
+            axs[-1].fill(*zip(*polygon), color=c, alpha=a)
+plt.show()
+
+
+#%% Generate nearest-neighbor distance histograms
+# TODO: THE BELOW CODE IS BROKEN!
 bin_width: float = 0.01  # Angstroms
 errorbar_offset: float = 50  # How far above the tallest histogram to place the error bars
 print_stats: bool = True  # Print distribution statistics to stdout
@@ -386,29 +502,12 @@ print_stats: bool = True  # Print distribution statistics to stdout
 if len(combos) > len(basic_colors):  # This is checked when plotting vPCFs, but in case that step is skipped check again
     raise RuntimeError(f"Trying to plot {len(combos)} histograms with {len(basic_colors)} colors: plot fewer vPCFs or"
                        " add additional colors.")
-# Regenerate frame, in case we need it or it's been mucked with
-try:
-    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name].at_cols)
-except KeyError:
-    # Lattice may have been rotated
-    frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name+"_rot"].at_cols)
-frame.drop(["site_frac", "x", "y", "weight"], axis=1, inplace=True)  # We don't need these cols
-frame.reset_index(drop=True, inplace=True)
-
-uv_offsets = [(2/3, 1/2), (2/3, -1/2), (1/3, 1/2), (1/3, -1/2), (0, 1),
-              (0, -1), (-1/3, 1/2), (-1/3, -1/2), (-2/3, 1/2), (-2/3, -1/2)]
-frame["neighborhood"] = frame.apply(lambda row: get_uv_neighbors(row, frame, uv_offsets), axis=1)
-
-
-#%%
 
 coord_dict = {lab: lattice.at_cols.loc[lattice.at_cols["elem"] == lab, ["x_fit", "y_fit", "u", "v"]].to_numpy()
               for lab in column_labels}
 hist_dists = {combo: nn_distances(coord_dict[combo[0]],
                                   coord_dict[combo[1]],
                                   lattice.pixel_size_est) for combo in combos}
-
-
 
 hist_stats = {combo: describe(dists) for combo, dists in hist_dists.items()}
 if print_stats:
@@ -483,3 +582,5 @@ if savedir == Path("."):
 else:
     hist_fig.set_size_inches(10, 6)
     hist_fig.savefig(savedir, dpi=600, bbox_inches="tight")
+
+#%%

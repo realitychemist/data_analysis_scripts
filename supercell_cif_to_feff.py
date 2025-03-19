@@ -82,6 +82,6 @@ with open(tk_popover(save=True), "wt") as outfile:
     for dist, site in zip(min_distances, struct.sites):
         outfile.write(f"{site.x:.7f}\t{site.y:.7f}\t{site.z:.7f}\t"
                       f"{potential_mapping[site.species_string]}\t{site.species_string}"
-                      f"{' * interior' if dist > rfms and potential_mapping[site.species_string]==1 else ''}\n")
+                      f"{' * interior' if dist > rfms else ''}\n")
 
 #%%
