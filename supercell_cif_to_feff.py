@@ -71,8 +71,7 @@ plt.show()
 # %% Output
 # FEFF needs to label each position with its potential index (defined in feff.inp)
 # Define the mapping here, just make sure it's consistent with the POTENTIALS card
-# Whichever element is potential index 1 will have its first (interior) instance labeled as potential 0 (ELNES target)
-# All interior instances of the element with potential index 1 will be labeled with a comment in the output
+# All interior atoms (> rfms from any surface) will be labeled with a comment in the output
 potential_mapping = {"N": 1,
                      "Al": 2,
                      "Gd": 3}
