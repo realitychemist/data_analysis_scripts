@@ -383,7 +383,7 @@ plt.show()
 # Local Study #
 ###############
 #%% Regenerate frame, in case we need it or it's been mucked with, setup for spatial stats
-n_sigmas: float = 0.1  # Number of standard deviations away from the mean a point can be before outlier rejection
+n_sigmas: float = 2  # Number of standard deviations away from the mean a point can be before outlier rejection
 
 try:
     frame = copy.deepcopy(hr_img.latt_dict[latt_dict_name].at_cols)

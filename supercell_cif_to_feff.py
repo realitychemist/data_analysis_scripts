@@ -31,8 +31,8 @@ def tk_popover(save: bool = False, **kwargs):
 # %% Read & tile
 parser = cif.CifParser(tk_popover())
 struct = parser.parse_structures(primitive=False)[0]
-scaling_matrix = np.array([[3, 0, 0],  # User-defined supercell tiling
-                           [0, 3, 0],
+scaling_matrix = np.array([[2, 0, 0],  # User-defined supercell tiling
+                           [0, 2, 0],
                            [0, 0, 3]])
 struct.make_supercell(scaling_matrix)
 
@@ -47,7 +47,7 @@ distances = np.abs(hull_eqs[:, :-1] @ allcoords.T + hull_eqs[:, -1:]) / norms
 min_distances = distances.min(axis=0)
 
 # %% Set FMS radius
-rfms: float = 8  # Angstrom
+rfms: float = 10  # Angstrom
 
 # %% Visualize and confirm that it looks plausible
 # Note: this is just for sanity chacking; the color-coded interior atoms are not filtered by element
@@ -72,7 +72,7 @@ plt.show()
 # FEFF needs to label each position with its potential index (defined in feff.inp)
 # Define the mapping here, just make sure it's consistent with the POTENTIALS card
 # Whichever element is potential index 1 will have its first (interior) instance labeled as potential 0 (ELNES target)
-# All interior instances of the element with potnential index 1 will be labeled with a comment in the output
+# All interior instances of the element with potential index 1 will be labeled with a comment in the output
 potential_mapping = {"N": 1,
                      "Al": 2,
                      "Gd": 3}
@@ -83,5 +83,3 @@ with open(tk_popover(save=True), "wt") as outfile:
         outfile.write(f"{site.x:.7f}\t{site.y:.7f}\t{site.z:.7f}\t"
                       f"{potential_mapping[site.species_string]}\t{site.species_string}"
                       f"{' * interior' if dist > rfms else ''}\n")
-
-#%%
