@@ -50,7 +50,7 @@ min_distances = distances.min(axis=0)
 rfms: float = 10  # Angstrom
 
 # %% Visualize and confirm that it looks plausible
-# Note: this is just for sanity chacking; the color-coded interior atoms are not filtered by element
+# Note: this is just for sanity checking; the color-coded interior atoms are not filtered by element
 matplotlib.use('TkAgg')
 fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
