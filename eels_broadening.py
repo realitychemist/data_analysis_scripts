@@ -1,28 +1,8 @@
-from tkinter import Tk
 import numpy as np
-from tkinter.filedialog import askopenfilename, asksaveasfilename
 import scipy
 import pandas
 import matplotlib.pyplot as plt
-
-
-def tk_popover(save: bool = False, **kwargs):
-    """Tk helper to ensure window appears on top."""
-    root = Tk()
-    root.iconify()
-    root.attributes('-topmost', True)
-    root.update()
-    loc = None  # Default return if open fails; will likely cause an error when passed along
-    try:
-        if not save:
-            loc = askopenfilename(parent=root, **kwargs)
-        else:
-            loc = asksaveasfilename(parent=root, **kwargs)
-
-    finally:
-        root.attributes('-topmost', False)
-        root.destroy()
-    return loc
+from utils import tk_popover
 
 
 def lorentzian(x, x0, gamma):

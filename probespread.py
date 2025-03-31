@@ -3,27 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tifffile
 from pathlib import Path
-from tkinter import Tk
-from tkinter.filedialog import askdirectory, asksaveasfilename
-
-
-def tk_popover(save: bool = False, **kwargs):
-    """Tk helper to ensure window appears on top."""
-    root = Tk()
-    root.iconify()
-    root.attributes('-topmost', True)
-    root.update()
-    loc = None  # Default return if open fails; will likely cause an error when passed along
-    try:
-        if not save:
-            loc = askdirectory(parent=root, **kwargs)
-        else:
-            loc = asksaveasfilename(parent=root, **kwargs)
-
-    finally:
-        root.attributes('-topmost', False)
-        root.destroy()
-    return loc
+from utils import tk_popover
 
 
 # %%

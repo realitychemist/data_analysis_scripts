@@ -2,7 +2,7 @@ import copy
 import json
 import re
 from pathlib import Path
-from tkinter.filedialog import askopenfilename, askopenfilenames, askdirectory
+from utils import tk_popover
 from typing import Literal
 import numpy as np
 from h5py import File  # This is a custom HDF5 format, as far as I know, so I use h5py instead of hyperspy
@@ -39,7 +39,7 @@ cal: str = 'NOCAL'  # Default export filename component if no scan calibration u
 structure_type: Literal["h5", "loose"] = "h5"  # Other format types may be supported in the future
 match structure_type:
     case "h5":
-        fpath = Path(askopenfilename(filetypes=[("HDF 5", ".h5")]))
+        fpath = Path(tk_popover(filetypes=[("HDF 5", ".h5")]))
         fname = fpath.stem
         with File(fpath.resolve(strict=True), 'r') as f:
             # Extract scan angles, then take the first few set by num_frames_to_use (or warn that there are fewer)
@@ -72,8 +72,8 @@ match structure_type:
                 # Finally, get the metadata
             metadata = json.loads(f['Metadata'].asstr()[0])
     case "loose":
-        file_list = askopenfilenames(filetypes=[("TIFF", ".tif"), ("PNG", ".png"), ("JPEG", ".jpg"),
-                                                ("Bitmap", ".bmp"), ("GIF", ".gif")])
+        file_list = tk_popover(many=True, filetypes=[("TIFF", ".tif"), ("PNG", ".png"), ("JPEG", ".jpg"),
+                                                     ("Bitmap", ".bmp"), ("GIF", ".gif")])
         file_list = [Path(file) for file in file_list]
         # All files must have the same suffix, and be of a known type
         supported = {".tif", ".png", ".jpg", ".bmp", ".gif"}
@@ -157,7 +157,7 @@ if dpc_found:
     image_final_bd, _, _ = SPmerge03(sm_bd, KDEsigma=sigma)
 
 # %% Save and export to tiff
-directory = Path(askdirectory())
+directory = Path(tk_popover(open_dir=True))
 
 tifffile.imwrite(directory / f"{fname}_HAADF_DCORR_{cal}.tif", haadf_drift_corr, photometric="minisblack")
 if dpc_found:

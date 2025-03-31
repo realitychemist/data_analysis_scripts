@@ -28,9 +28,9 @@ from packaging import version
 from pathlib import Path
 from platform import system
 from tifffile import imwrite
-from tkinter.filedialog import askopenfilename, askdirectory
 from typing import Literal
 from warnings import warn
+from utils import tk_popover
 
 if not version.parse(abtem.__version__) >= version.parse("1.0.0"):
     raise RuntimeError("This script will only work with abTEM versions >= 1.0.0 due to breaking changes in abTEM. "
@@ -274,7 +274,7 @@ match load_method:
         struct = io.read(fixed_path)
         fname = fixed_path.stem
     case "interactive":
-        interactive_path = Path(askopenfilename())
+        interactive_path = Path(tk_popover())
         struct = io.read(interactive_path)
         fname = interactive_path.stem
     case "mp_api":
@@ -296,7 +296,7 @@ match load_method:
 view(struct)
 
 # %% Define the save location
-savedir = Path(askdirectory())
+savedir = Path(tk_popover(open_dir=True))
 if savedir == Path("."):  # Returned root
     warn("Save directory is currently set to root ('.').  Are you sure this is what you meant to do?")
 

@@ -1,27 +1,7 @@
 # Interpolate spectra which have two different x-axes (energy for EELS, 2-theta for XRD, etc...)
-from tkinter import Tk
 import numpy as np
-from tkinter.filedialog import askopenfilename, asksaveasfilename
 import pandas as pd
-
-
-def tk_popover(save: bool = False, **kwargs):
-    """Tk helper to ensure window appears on top."""
-    root = Tk()
-    root.iconify()
-    root.attributes('-topmost', True)
-    root.update()
-    loc = None  # Default return if open fails; will likely cause an error when passed along
-    try:
-        if not save:
-            loc = askopenfilename(parent=root, **kwargs)
-        else:
-            loc = asksaveasfilename(parent=root, **kwargs)
-
-    finally:
-        root.attributes('-topmost', False)
-        root.destroy()
-    return loc
+from utils import tk_popover
 
 
 # %% Read in EELS data from .xlsx
@@ -43,5 +23,5 @@ for e_col, i_col in zip(e_columns, i_columns):
     new_df.loc[new_df["E"] > max_e, i_col] = pd.NA  # Tidy the end of the list
 
 # %%
-with pd.ExcelWriter(tk_popover(), mode="a") as writer:
+with pd.ExcelWriter(tk_popover(save=True), mode="a") as writer:
     new_df.to_excel(writer, index=False, sheet_name="interp")

@@ -1,7 +1,7 @@
 """Process DPC data from an .emd (Velox) file into iDPC/dDPC images.
 Script by CSE, adapted from a script by scaldero."""
 from pathlib import Path
-from tkinter.filedialog import askopenfilename, askdirectory
+from utils import tk_popover
 from tkinter.simpledialog import askfloat
 from tifffile import imwrite
 import hyperspy.api as hs
@@ -9,7 +9,7 @@ import numpy as np
 
 
 # %% Load the images from .emd
-infile = hs.load(askopenfilename())
+infile = hs.load(tk_popover())
 try:
     img_ac = next(signal for signal in infile if signal.metadata.General.title == "A-C")
     img_bd = next(signal for signal in infile if signal.metadata.General.title == "B-D")
@@ -73,7 +73,7 @@ ddpc = -(grad_x + grad_y).astype("float32")
 
 # %% Export the images
 export_registered: bool = True
-directory = Path(askdirectory())
+directory = Path(tk_popover(open_dir=True))
 # By default this script saves the new images with the same filename as the original file
 fname = infile[0].tmp_parameters.original_filename
 # Optionally, uncomment to provide a new filename as a string (no extension)

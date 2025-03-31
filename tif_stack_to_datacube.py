@@ -10,23 +10,23 @@ import numpy as np
 import os.path as path
 from tempfile import TemporaryDirectory
 from timeit import default_timer
-from tkinter.filedialog import askopenfilename, asksaveasfilename
+from utils import tk_popover
 
 crop_and_bin = True  # Set to true to crop-and-bin data before saving, or False to save the original data
 crop_to: tuple[int, int] = (600, 600)  # Size to crop individual diffraction patterns to (before binning)
 bin_factor: int = 3  # Number of pixels to bin in each image direction
 
 # %% Open JSON meta-file
-meta_fname = askopenfilename(filetypes=[("JSON Files", ".json")])
+meta_fname = tk_popover(filetypes=[("JSON Files", ".json")])
 with open(meta_fname, "r") as f:
     input_meta = json.load(f)
 
 # %% Open tiff stack
-tiff_fname = askopenfilename(filetypes=[("Tagged Image File Format", ".tif")])
+tiff_fname = tk_popover(filetypes=[("Tagged Image File Format", ".tif")])
 input_tiff = tifffile.memmap(tiff_fname)  # Memory map needed for very large files
 
 # %% Decide where the datacube will be saved
-emd_fname = asksaveasfilename(defaultextension=".emd", filetypes=[("Electron Microscopy Dataset", ".emd")])
+emd_fname = tk_popover(save=True, defaultextension=".emd", filetypes=[("Electron Microscopy Dataset", ".emd")])
 
 # %% Reshape, optionally crop-and-bin, then save
 # Reshaping the memory map is fast

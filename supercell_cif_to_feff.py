@@ -1,31 +1,11 @@
 from pymatgen.io import cif
-from tkinter.filedialog import askopenfilename, asksaveasfilename
 from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from warnings import warn
 import matplotlib
-from tkinter import Tk
 import numpy as np
-
-
-def tk_popover(save: bool = False, **kwargs):
-    """Tk helper to ensure window appears on top."""
-    root = Tk()
-    root.iconify()
-    root.attributes('-topmost', True)
-    root.update()
-    loc = None  # Default return if open fails; will likely cause an error when passed along
-    try:
-        if not save:
-            loc = askopenfilename(parent=root, **kwargs)
-        else:
-            loc = asksaveasfilename(parent=root, **kwargs)
-
-    finally:
-        root.attributes('-topmost', False)
-        root.destroy()
-    return loc
+from utils import tk_popover
 
 
 # %% Read & tile

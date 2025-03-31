@@ -1,8 +1,7 @@
 import copy
 from pathlib import Path
-from tkinter import Tk
-from tkinter.filedialog import askopenfilename, asksaveasfilename
 from typing import Literal
+from utils import tk_popover
 
 from tifffile import imread
 from warnings import warn
@@ -74,27 +73,12 @@ def get_uv_neighbors(row: pd.Series | pd.DataFrame,
     return list(neighborhood)
 
 
-def tk_open(**kwargs):
-    """Tk helper to ensure window appears on top."""
-    root = Tk()
-    root.iconify()
-    root.attributes('-topmost', True)
-    root.update()
-    loc = None  # Default return if open fails; will likely cause an error when passed along
-    try:
-        loc = askopenfilename(parent=root, **kwargs)
-    finally:
-        root.attributes('-topmost', False)
-        root.destroy()
-    return loc
-
-
 ##################
 #     PART 1     #
 # Import and Fit #
 ##################
 # %% Image import
-path = Path(tk_open())
+path = Path(tk_popover())
 match path.suffix:
     case ".tif":
         # noinspection PyTypeChecker
@@ -133,7 +117,7 @@ match load_method:
     case "fixed":
         uc = so.UnitCell(str(fixed_path), origin_shift=origin_shift)
     case "interactive":
-        interactive_path = Path(tk_open())
+        interactive_path = Path(tk_popover())
         uc = so.UnitCell(str(interactive_path), origin_shift=origin_shift)
     case "mp_api":
         print(f"Searching for {mp_id}...")
@@ -313,7 +297,7 @@ vpcf_ax.get_xaxis().set_visible(False)
 vpcf_ax.get_yaxis().set_visible(False)
 
 # Save figure if desired; DO NOT close the plot window first, or an error will be thrown
-savedir = Path(asksaveasfilename(defaultextension=".png"))
+savedir = Path(tk_popover(save=True, defaultextension=".png"))
 if savedir == Path("."):
     warn("Cannot save file to root directory; file save canceled!")
 else:
@@ -576,7 +560,7 @@ hist_ax.set_xlim(meanx-x_spread, meanx+x_spread)
 hist_ax.set_xlabel("Distance (\u212B)")
 
 # Save figure if desired; DO NOT close the plot window first, or an error will be thrown
-savedir = Path(asksaveasfilename(defaultextension=".png"))
+savedir = Path(tk_popover(save=True, defaultextension=".png"))
 if savedir == Path("."):
     warn("Cannot save file to root directory; file save canceled!")
 else:
