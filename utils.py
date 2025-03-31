@@ -5,7 +5,7 @@ from tkinter import Tk
 from tkinter.filedialog import askdirectory, asksaveasfilename, askopenfilenames, askopenfilename
 
 
-def tk_popover(save: bool = False, open_dir: bool = False, open_many: bool = True, **kwargs):
+def tk_popover(save: bool = False, open_dir: bool = False, open_many: bool = False, **kwargs):
     """Tk helper to ensure window appears on top. Default behavior returns a single file location."""
     assert not (save and open_dir)
     assert not (open_dir and open_many)
