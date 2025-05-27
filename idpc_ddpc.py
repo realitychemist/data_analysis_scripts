@@ -1,7 +1,7 @@
 """Process DPC data from an .emd (Velox) file into iDPC/dDPC images.
 Script by CSE, adapted from a script by scaldero."""
 from pathlib import Path
-from utils import tk_popover
+from data_analysis_scripts.utils import tk_popover
 from tkinter.simpledialog import askfloat
 from tifffile import imwrite
 import hyperspy.api as hs

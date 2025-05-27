@@ -5,7 +5,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from warnings import warn
 import matplotlib
 import numpy as np
-from utils import tk_popover
+from data_analysis_scripts.utils import tk_popover
 
 
 # %% Read & tile
@@ -27,7 +27,7 @@ distances = np.abs(hull_eqs[:, :-1] @ allcoords.T + hull_eqs[:, -1:]) / norms
 min_distances = distances.min(axis=0)
 
 # %% Set FMS radius
-rfms: float = 10  # Angstrom
+rfms: float = 8  # Angstrom
 
 # %% Visualize and confirm that it looks plausible
 # Note: this is just for sanity checking; the color-coded interior atoms are not filtered by element
