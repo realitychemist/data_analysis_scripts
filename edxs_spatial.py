@@ -195,28 +195,29 @@ neighborhood: list[tuple[int, int]] = [(-1, 0), (1, 0), (0, -1), (0, 1),    # Ro
                                        (-1, -1), (-1, 1), (1, -1), (1, 1)]  # Bishop part
 perms: int = 10_000  # Number of permutations for testing against CSR
 alpha: float = 0.05  # Alpha level for FDR control
+dataset: np.ndarray = quadcounts[4]  # data or quadcounts[int] (for unbinned data or some binning, respectively)
 
 local_stats = []
 adjlist = {}
-for i in range(data.shape[0]):
-    for j in range(data.shape[1]):
+for i in range(dataset.shape[0]):
+    for j in range(dataset.shape[1]):
         nidxs = []
         for di, dj in neighborhood:
-            if 0 <= i+di < data.shape[0] and 0 <= j+dj < data.shape[1]:
+            if 0 <= i+di < dataset.shape[0] and 0 <= j+dj < dataset.shape[1]:
                 nidxs.append((i+di, j+dj))
         adjlist[(i, j)] = nidxs
 w = weights.W(adjlist)
 w.transform = "r"  # Row-standard transform
-ml = Moran_Local(data, w, permutations=perms, n_jobs=32)  # Parallelize computation
+ml = Moran_Local(dataset, w, permutations=perms, n_jobs=32)  # Parallelize computation
 
-# %% Plot local Moran results
+# Plotting
 polygons = []
 counts = []
-for i in range(data.shape[0]):
-    for j in range(data.shape[1]):
+for i in range(dataset.shape[0]):
+    for j in range(dataset.shape[1]):
         poly = box(j, -i-1, j+1, -i)  # Axes flipped for proper plotting
         polygons.append(poly)
-        counts.append(data[i, j])
+        counts.append(dataset[i, j])
 
 gdf = GeoDataFrame({"counts": counts, "geometry": polygons})
 ml_axs = ml.plot_combination(gdf=gdf, attribute="counts", crit_value=fdr(ml.p_sim, alpha=alpha),
