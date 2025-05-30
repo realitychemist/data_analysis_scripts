@@ -41,7 +41,7 @@ for det in detectors:
     except AttributeError:  # Non-EDXS detectors have a differently-named field
         continue
 
-integrated_spectrum = np.sum(np.sum(infile[9].data, axis=0), axis=0)
+integrated_spectrum = np.sum(np.sum(whole_dataset.data, axis=0), axis=0)
 # Shift to align strobe peak to zero
 # Note: Below depends on strobe peak being larger than any signal peaks; _usually_ true, but not guaranteed
 strobe_idx = np.argmax(integrated_spectrum)
@@ -55,12 +55,21 @@ plt.plot(energy_axis[strobe_idx+20:], integrated_spectrum[strobe_idx+20:],
 
 # These are specific to the experiment I developed this scrip for
 # Use this as an example if looking at different elements
-plt.text(1.486, max(integrated_spectrum[np.argwhere([1.4 < e < 1.5 for e in energy_axis])])*1.05,
-         "Al Kα", horizontalalignment="center")
-plt.text(4.088, max(integrated_spectrum[np.argwhere([4.0 < e < 4.1 for e in energy_axis])])*1.1,
-         "Sc Kα", horizontalalignment="center")
-plt.text(4.461, max(integrated_spectrum[np.argwhere([4.4 < e < 4.5 for e in energy_axis])])*1.4,
-         "Sc Kβ", horizontalalignment="left")
+# plt.text(1.486, max(integrated_spectrum[np.argwhere([1.4 < e < 1.5 for e in energy_axis])])*1.05,
+#          "Al Kα", horizontalalignment="center")
+# plt.text(4.088, max(integrated_spectrum[np.argwhere([4.0 < e < 4.1 for e in energy_axis])])*1.1,
+#          "Sc Kα", horizontalalignment="center")
+# plt.text(4.461, max(integrated_spectrum[np.argwhere([4.4 < e < 4.5 for e in energy_axis])])*1.4,
+#          "Sc Kβ", horizontalalignment="left")
+
+plt.text(9.712, max(integrated_spectrum[np.argwhere([9.7 < e < 9.8 for e in energy_axis])])*1.05,
+         "Au Lα", horizontalalignment="center")
+plt.text(9.441, max(integrated_spectrum[np.argwhere([9.4 < e < 9.5 for e in energy_axis])])*1.05,
+         "Pt Lα", horizontalalignment="right")
+plt.text(2.120, max(integrated_spectrum[np.argwhere([2.1 < e < 2.2 for e in energy_axis])])*1.05,
+         "Au M", horizontalalignment="center")
+plt.text(2.048, max(integrated_spectrum[np.argwhere([2.0 < e < 2.07 for e in energy_axis])])*1.05,
+         "Pt M", horizontalalignment="right")
 
 plt.gca().spines['top'].set_visible(False)
 plt.gca().spines['right'].set_visible(False)
@@ -69,8 +78,8 @@ plt.xlabel("Energy (keV)")
 plt.show()
 
 # %% Extract and show spectrum image
-element: str = "Sc"  # Element of interest
-sb_size_nm: float = 1  # Scalebar size (nm)
+element: str = "Au"  # Element of interest
+sb_size_nm: float = 5  # Scalebar size (nm)
 
 signal = None
 for f in infile:
@@ -84,27 +93,29 @@ px_size_pm = float(signal.original_metadata.BinaryResult.PixelSize["width"])  # 
 px_size_pm = px_size_pm / 10e-12  # picometers
 sb_size_px = sb_size_nm / px_size_pm * 1000
 
-datamax = int(np.max(data))
-cmap = plt.get_cmap("inferno", lut=datamax+1)
-norm = BoundaryNorm(np.arange(datamax+2), cmap.N)
-
-plt.imshow(data, cmap=cmap, norm=norm, interpolation="nearest")
+if type(data.ravel()[0]) is int:
+    datamax = int(np.max(data))
+    cmap = plt.get_cmap("inferno", lut=datamax+1)
+    norm = BoundaryNorm(np.arange(datamax+2), cmap.N)
+    plt.imshow(data, cmap=cmap, norm=norm, interpolation="nearest")
+    cbar = plt.colorbar(location="left", pad=0.01, label="Counts", ticks=np.arange(datamax+1)+0.5)
+    cbar.ax.set_yticklabels(np.arange(datamax+1))
+    cbar.ax.tick_params(size=0)
+else:
+    data = data * 100  # Put on % scale
+    plt.imshow(data, cmap="inferno", interpolation="nearest")
+    plt.colorbar(location="left", pad=0.01, label="% Au")  # Change label for other datasets!
 
 scalebar = AnchoredSizeBar(plt.gca().transData, sb_size_px, f"{sb_size_nm} nm", "lower left", pad=0.25,
                            color="white", frameon=False, size_vertical=2, fontproperties=FontProperties(weight="bold"))
 plt.gca().add_artist(scalebar)
-
-cbar = plt.colorbar(location="left", pad=0.01, label="Counts", ticks=np.arange(datamax+1)+0.5)
-cbar.ax.set_yticklabels(np.arange(datamax+1))
-cbar.ax.tick_params(size=0)
-
 plt.xticks([])
 plt.yticks([])
 plt.tight_layout()
 plt.show()
 
 # %% Kernel density estimate
-kde_bandwidth: float or None = 0.05  # KDE bandwidth; if None, calculate automatically with Scott rule
+kde_bandwidth: float or None = 0.01  # KDE bandwidth; if None, calculate automatically with Scott rule
 
 y_idxs, x_idxs = np.nonzero(data)
 counts = data[y_idxs, x_idxs]
@@ -128,7 +139,7 @@ plt.tight_layout()
 plt.show()
 
 # %% Quadrat counts
-divs: list[int] = [3, 6, 12, 30, 60, 90, 120]
+divs: list[int] = [8, 16, 32, 64, 128, 256, 512]
 if len(divs) != 7:  # Update this check if length of above list changes, but only after fixing plotting!
     raise UserWarning("The plotting code below assumes 7 sublpots, and will need to be adjusted")
 
@@ -194,8 +205,7 @@ for i, subreg in enumerate(subregions):
 neighborhood: list[tuple[int, int]] = [(-1, 0), (1, 0), (0, -1), (0, 1),    # Rook part
                                        (-1, -1), (-1, 1), (1, -1), (1, 1)]  # Bishop part
 perms: int = 10_000  # Number of permutations for testing against CSR
-alpha: float = 0.05  # Alpha level for FDR control
-dataset: np.ndarray = quadcounts[4]  # data or quadcounts[int] (for unbinned data or some binning, respectively)
+dataset: np.ndarray = quadcounts[-1]  # data or quadcounts[int] (for unbinned data or some binning, respectively)
 
 local_stats = []
 adjlist = {}
@@ -208,9 +218,9 @@ for i in range(dataset.shape[0]):
         adjlist[(i, j)] = nidxs
 w = weights.W(adjlist)
 w.transform = "r"  # Row-standard transform
-ml = Moran_Local(dataset, w, permutations=perms, n_jobs=32)  # Parallelize computation
+ml = Moran_Local(dataset, w, permutations=perms, n_jobs=1)  # Parallelize computation
 
-# Plotting
+# For plotting
 polygons = []
 counts = []
 for i in range(dataset.shape[0]):
@@ -218,10 +228,18 @@ for i in range(dataset.shape[0]):
         poly = box(j, -i-1, j+1, -i)  # Axes flipped for proper plotting
         polygons.append(poly)
         counts.append(dataset[i, j])
-
 gdf = GeoDataFrame({"counts": counts, "geometry": polygons})
+
+# %% Generate the plot
+alpha: float = 0.01  # Alpha level for FDR control
+quadrant: None | int = 1  # Setting this to an integer (1--4) will highlight the respective Moran quadrant:
+# 1 --> High-High clusters
+# 2 --> Low-High outliers
+# 3 --> Low-Low clusters
+# 4 --> High-Low outliers
+# None --> no highlighting
 ml_axs = ml.plot_combination(gdf=gdf, attribute="counts", crit_value=fdr(ml.p_sim, alpha=alpha),
-                             scheme="EqualInterval", cmap="inferno")
+                             scheme="EqualInterval", cmap="inferno", quadrant=quadrant)
 plt.show()
 
 #%%
