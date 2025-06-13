@@ -21,7 +21,12 @@ from tabulate import tabulate
 matplotlib.use("TkAgg")
 
 # %% Load the .emd
-infile = hs.load(tk_popover())
+infile = hs.load(tk_popover(),
+                 load_SI_image_stack=True,
+                 sum_frames=False,
+                 lazy=False,
+                 rebin_energy=8,
+                 SI_dtype="uint8")
 
 # %% Get overall spectrum
 whole_dataset = None
@@ -79,7 +84,7 @@ plt.show()
 
 # %% Extract and show spectrum image
 element: str = "Au"  # Element of interest
-sb_size_nm: float = 5  # Scalebar size (nm)
+sb_size_nm: float = 20  # Scalebar size (nm)
 
 signal = None
 for f in infile:
@@ -93,18 +98,17 @@ px_size_pm = float(signal.original_metadata.BinaryResult.PixelSize["width"])  # 
 px_size_pm = px_size_pm / 10e-12  # picometers
 sb_size_px = sb_size_nm / px_size_pm * 1000
 
-if type(data.ravel()[0]) is int:
-    datamax = int(np.max(data))
-    cmap = plt.get_cmap("inferno", lut=datamax+1)
-    norm = BoundaryNorm(np.arange(datamax+2), cmap.N)
-    plt.imshow(data, cmap=cmap, norm=norm, interpolation="nearest")
-    cbar = plt.colorbar(location="left", pad=0.01, label="Counts", ticks=np.arange(datamax+1)+0.5)
-    cbar.ax.set_yticklabels(np.arange(datamax+1))
-    cbar.ax.tick_params(size=0)
-else:
-    data = data * 100  # Put on % scale
-    plt.imshow(data, cmap="inferno", interpolation="nearest")
-    plt.colorbar(location="left", pad=0.01, label="% Au")  # Change label for other datasets!
+datamax = int(np.max(data))
+cmap = plt.get_cmap("inferno", lut=datamax+1)
+norm = BoundaryNorm(np.arange(datamax+2), cmap.N)
+plt.imshow(data, cmap=cmap, norm=norm, interpolation="nearest")
+cbar = plt.colorbar(location="left", pad=0.01, label="Counts", ticks=np.arange(datamax+1)+0.5)
+cbar.ax.set_yticklabels(np.arange(datamax+1))
+cbar.ax.tick_params(size=0)
+
+# data = data * 100  # Put on % scale
+# plt.imshow(data, cmap="inferno", interpolation="nearest")
+# plt.colorbar(location="left", pad=0.01, label="% Au")  # Change label for other datasets!
 
 scalebar = AnchoredSizeBar(plt.gca().transData, sb_size_px, f"{sb_size_nm} nm", "lower left", pad=0.25,
                            color="white", frameon=False, size_vertical=2, fontproperties=FontProperties(weight="bold"))
@@ -115,7 +119,7 @@ plt.tight_layout()
 plt.show()
 
 # %% Kernel density estimate
-kde_bandwidth: float or None = 0.01  # KDE bandwidth; if None, calculate automatically with Scott rule
+kde_bandwidth: float or None = 0.02  # KDE bandwidth; if None, calculate automatically with Scott rule
 
 y_idxs, x_idxs = np.nonzero(data)
 counts = data[y_idxs, x_idxs]
@@ -205,7 +209,7 @@ for i, subreg in enumerate(subregions):
 neighborhood: list[tuple[int, int]] = [(-1, 0), (1, 0), (0, -1), (0, 1),    # Rook part
                                        (-1, -1), (-1, 1), (1, -1), (1, 1)]  # Bishop part
 perms: int = 10_000  # Number of permutations for testing against CSR
-dataset: np.ndarray = quadcounts[-1]  # data or quadcounts[int] (for unbinned data or some binning, respectively)
+dataset: np.ndarray = data  # data or quadcounts[int] (for unbinned data or some binning, respectively)
 
 local_stats = []
 adjlist = {}
@@ -231,7 +235,7 @@ for i in range(dataset.shape[0]):
 gdf = GeoDataFrame({"counts": counts, "geometry": polygons})
 
 # %% Generate the plot
-alpha: float = 0.01  # Alpha level for FDR control
+alpha: float = 0.1  # Alpha level for FDR control
 quadrant: None | int = 1  # Setting this to an integer (1--4) will highlight the respective Moran quadrant:
 # 1 --> High-High clusters
 # 2 --> Low-High outliers
