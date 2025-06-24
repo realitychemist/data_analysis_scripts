@@ -156,7 +156,7 @@ def _test_potential() -> abtem.Potential:
     """Returns an example potential (and pops up a view of it) in order to test that simulations are working."""
     from ase.build import bcc100
     from ase.visualize import view
-    structure = bcc100("Fe", size=(3, 3, 10), orthogonal=True, periodic=True)
+    structure = bcc100("Fe", size=(10, 10, 10), orthogonal=True, periodic=True)
     structure.symbols[13] = "Au"
     view(structure)  # This is not doing anything for some reason
     return abtem.Potential(structure,
@@ -180,7 +180,7 @@ if __name__ == "__main__":
     abtem.config.set({"device":              "gpu",  # Configure abTEM to run on the GPU
                       "dask.lazy":           False,  # Setting to False can be useful for debugging
                       "dask.chunk-size":     "128 MB",  # Standard L3 cache size (per core)
-                      "dask.chunk-size-gpu": "1024 MB"})  # Remember to leave space for overhead
+                      "dask.chunk-size-gpu": "2048 MB"})  # Remember to leave space for overhead
 
     # noinspection PyTypeChecker
     result = simulate_stem(potential=_test_potential(),
