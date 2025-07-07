@@ -100,10 +100,12 @@ def simulate_stem(potential: abtem.Potential,
                             tilt=tilt,
                             aberrations=aberrations)
         probe.match_grid(potential)
+        print("_debug_pre_measurement")
         measurement = probe.scan(potential=potential,
                                  scan=scan,
                                  detectors=detectors,
                                  **kwargs)
+        print("_debug_post_measurement")
     if eager:
         if type(measurement) is list:
             [m.compute() for m in measurement]
@@ -156,8 +158,8 @@ def _test_potential() -> abtem.Potential:
     """Returns an example potential (and pops up a view of it) in order to test that simulations are working."""
     from ase.build import bcc100
     from ase.visualize import view
-    structure = bcc100("Fe", size=(10, 10, 10), orthogonal=True, periodic=True)
-    structure.symbols[13] = "Au"
+    structure = bcc100("Fe", size=(2, 2, 2), orthogonal=True, periodic=True)
+    structure.symbols[1] = "Au"
     view(structure)  # This is not doing anything for some reason
     return abtem.Potential(structure,
                            sampling=0.04,
@@ -177,10 +179,10 @@ if __name__ == "__main__":
     # When calling ``simulate_stem`` from another script, ensure you set up your abTEM configuration
     # This can either be done like this (in the script) or in a configuration file to use the same settings
     #   for all scripts in a given python environment
-    abtem.config.set({"device":              "gpu",  # Configure abTEM to run on the GPU
+    abtem.config.set({"device":              "cpu",  # Configure abTEM to run on the GPU
                       "dask.lazy":           False,  # Setting to False can be useful for debugging
                       "dask.chunk-size":     "128 MB",  # Standard L3 cache size (per core)
-                      "dask.chunk-size-gpu": "2048 MB"})  # Remember to leave space for overhead
+                      "dask.chunk-size-gpu": "1024 MB"})  # Remember to leave space for overhead
 
     # noinspection PyTypeChecker
     result = simulate_stem(potential=_test_potential(),
