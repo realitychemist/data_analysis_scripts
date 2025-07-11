@@ -43,3 +43,7 @@ def suppress_stdout():
             yield
         finally:
             sys.stdout = old_stdout
+
+
+def minmax_norm(x):
+    return (x - x.min()) / (x.max() - x.min())
